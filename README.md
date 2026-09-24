@@ -132,22 +132,48 @@ viewport:
   height: 973
 ```
 
-Place one or more patient-list CSV files in the **project root** (same folder as `README.md`). Each file must include `id`, `first_name`, and `last_name`.
+Place patient-list CSV files in **`patient_lists/`** (create the folder if needed). Each file must include `id`, `first_name`, and `last_name`. CSVs outside `patient_lists/` are **not** used for export.
 
 On startup the exporter:
 
-1. Scans the project root for valid patient CSVs (not inside `downloads/` or `config/`)
-2. Tells you which file(s) it found
-3. Selects one automatically:
-   - Only one CSV → uses that file
-   - Multiple CSVs → prefers a filename that contains the `facility` from `credentials.yaml`, otherwise the most recently modified
+1. Scans `patient_lists/` for valid patient CSVs only
+2. Selects the file whose **filename matches** the `facility` from `credentials.yaml` (spaces, hyphens, and underscores are ignored when matching)
+3. If no file matches, the run stops with a clear error listing what was found
 4. Writes exports under `downloads/<Facility Name>/`
+
+Example layout:
+
+```
+patient_lists/
+  BG - Dose Aesthetics_Patients.csv
+  Reborn_Health_AND_Aesthetics_Patients_sample.csv
+config/credentials.yaml   # facility: BG - Dose Aesthetics  → uses the BG CSV only
+```
 
 ## Run
 
+Quick start (recommended):
+
 ```bash
-python src/main.py
+./export
 ```
+
+Or:
+
+```bash
+python3 run_export.py
+```
+
+Optional — install CLI commands (`run-export`, `watch-export`):
+
+```bash
+pip install --user .
+# then add ~/.local/bin to PATH if needed:
+export PATH="$HOME/.local/bin:$PATH"
+run-export
+```
+
+Note: if `pip install -e .` fails on your system, use `pip install --user .` instead, or skip install and use `./export`.
 
 Patients already fully exported (required document folders populated) are skipped unless newer records are detected. Incomplete patients are always finished before new ones (Phase 1 → Phase 2).
 
@@ -156,9 +182,15 @@ Patients already fully exported (required document folders populated) are skippe
 For long facility exports, use the supervisor so MemoryError / dead Playwright browsers trigger an automatic restart with fewer workers (5 → 3 → 2), always resuming incomplete folders first:
 
 ```bash
-python src/watch_export.py
-# or pin a log file:
-python src/watch_export.py --log bg_dose_export.log
+./overnight
+```
+
+Or:
+
+```bash
+python3 watch_export_cli.py
+# optional custom log file:
+python3 watch_export_cli.py --log reborn_export.log
 ```
 
 Supervisor settings live under `supervisor:` in `config/settings.yaml`. State is stored at `downloads/export_supervisor_state.json`.

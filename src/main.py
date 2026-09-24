@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import yaml
 import csv
 from auth import authenticate_and_select_facility
@@ -37,6 +38,7 @@ from client_delivery_report import generate_client_delivery_report
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config')
 DOWNLOADS_ROOT = os.path.join(PROJECT_ROOT, 'downloads')
+PATIENT_LISTS_DIR = os.path.join(PROJECT_ROOT, 'patient_lists')
 
 
 def sanitize_facility_folder_name(facility_name):
@@ -59,18 +61,37 @@ def csv_has_patient_columns(csv_path):
         return False
 
 
-def discover_root_patient_csvs():
+_FACILITY_MATCH_STOPWORDS = frozenset({'and', 'the', 'of', 'a', 'an'})
+
+
+def _normalize_facility_key(name):
+    """Alphanumeric tokens (minus stopwords) joined for loose filename matching."""
+    tokens = re.findall(r'[a-z0-9]+', (name or '').lower())
+    tokens = [t for t in tokens if t not in _FACILITY_MATCH_STOPWORDS]
+    return ''.join(tokens)
+
+
+def filename_matches_facility(facility_name, csv_path):
+    """True if the CSV basename matches the configured facility name."""
+    facility_key = _normalize_facility_key(facility_name)
+    if not facility_key:
+        return False
+    file_key = _normalize_facility_key(os.path.splitext(os.path.basename(csv_path))[0])
+    return facility_key in file_key or file_key in facility_key
+
+
+def discover_patient_csvs():
     """
-    Find patient-list CSV files in the project root only
-    (not inside downloads/, config/, src/, etc.).
+    Find patient-list CSV files in patient_lists/ only.
+    CSVs anywhere else in the project are ignored.
     """
     matches = []
-    if not os.path.isdir(PROJECT_ROOT):
+    if not os.path.isdir(PATIENT_LISTS_DIR):
         return matches
-    for name in os.listdir(PROJECT_ROOT):
+    for name in os.listdir(PATIENT_LISTS_DIR):
         if not name.lower().endswith('.csv'):
             continue
-        path = os.path.join(PROJECT_ROOT, name)
+        path = os.path.join(PATIENT_LISTS_DIR, name)
         if not os.path.isfile(path):
             continue
         if csv_has_patient_columns(path):
@@ -80,25 +101,26 @@ def discover_root_patient_csvs():
 
 def select_patient_csv(facility_name=None):
     """
-    Pick which root patient CSV to use.
-    Preference order when multiple exist:
-      1) Filename contains the facility name (case-insensitive)
-      2) Most recently modified valid patient CSV
+    Pick the patient CSV for the configured facility from patient_lists/.
+    Only files in patient_lists/ are considered.
     """
-    candidates = discover_root_patient_csvs()
+    candidates = discover_patient_csvs()
     if not candidates:
         return None, []
 
-    if len(candidates) == 1:
-        return candidates[0], candidates
+    facility = (facility_name or '').strip()
+    if not facility:
+        return None, candidates
 
-    facility = (facility_name or '').strip().lower()
-    if facility:
-        for path in candidates:
-            if facility in os.path.basename(path).lower():
-                return path, candidates
+    matched = [path for path in candidates if filename_matches_facility(facility, path)]
+    if not matched:
+        return None, candidates
 
-    return candidates[0], candidates
+    if len(matched) == 1:
+        return matched[0], candidates
+
+    matched.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return matched[0], candidates
 
 # Patient subfolders in display/process serial order (numeric prefix keeps name-sort order)
 PATIENT_SUBFOLDERS = [
@@ -1014,22 +1036,36 @@ async def main():
     settings = load_yaml(os.path.join(CONFIG_PATH, 'settings.yaml'))
     facility_name = credentials.get('facility', 'Facility')
 
+    os.makedirs(PATIENT_LISTS_DIR, exist_ok=True)
+
     csv_path, csv_candidates = select_patient_csv(facility_name)
     if not csv_path:
-        log.error("No patient list CSV found in the project root.")
-        log.info(
-            "Place a CSV with columns id, first_name, last_name "
-            f"directly in: {PROJECT_ROOT}"
-        )
+        if not csv_candidates:
+            log.error(f"No patient list CSV found in: {PATIENT_LISTS_DIR}")
+            log.info(
+                "Add a CSV with columns id, first_name, last_name to patient_lists/. "
+                "The filename should include the facility name from credentials.yaml."
+            )
+        else:
+            log.error(
+                f"No patient list CSV in patient_lists/ matches facility '{facility_name}'."
+            )
+            log.info(f"Found {len(csv_candidates)} CSV file(s) in patient_lists/:")
+            for path in csv_candidates:
+                log.info(f"  - {os.path.basename(path)}")
+            log.info(
+                "Rename or add a CSV whose filename includes the facility name "
+                f"(e.g. '{facility_name}_Patients.csv')."
+            )
         return
 
     if len(csv_candidates) > 1:
-        log.info(f"Found {len(csv_candidates)} patient CSV file(s) in project root:")
+        log.info(f"Found {len(csv_candidates)} patient CSV file(s) in patient_lists/:")
         for path in csv_candidates:
             marker = "← selected" if os.path.abspath(path) == os.path.abspath(csv_path) else ""
             log.info(f"  - {os.path.basename(path)} {marker}".rstrip())
     else:
-        log.info(f"Found patient list CSV in project root: {os.path.basename(csv_path)}")
+        log.info(f"Found patient list CSV in patient_lists/: {os.path.basename(csv_path)}")
 
     log.info(f"Starting export with patient list: {os.path.basename(csv_path)}")
     log.info(f"Full path: {csv_path}")

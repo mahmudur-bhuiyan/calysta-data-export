@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calysta-data-export"
+version = "0.1.0"
+description = "Bulk export of Calysta Pro EMR patient records"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "playwright",
+    "pyyaml",
+    "aiofiles",
+]
+
+[project.scripts]
+run-export = "run_export:main"
+watch-export = "watch_export_cli:main"
+
+[tool.setuptools]
+py-modules = ["run_export", "watch_export_cli"]

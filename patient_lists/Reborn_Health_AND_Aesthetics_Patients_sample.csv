@@ -1,0 +1,8 @@
+id,facility_id,first_name,last_name,dob,gender,email,work_phone,home_phone,address,city,state_name,zip,sms_texting,sms_clinical_information,email_notification,email_marketing,is_active,is_verified,is_deleted,sticky_note,created_on,modified_on
+278819,904,Andrea,Richart,1984-08-09,Female,richartan111@gmail.com,+1(786)338-0000,+1(786)338-0000,"1806  plough drive",Hilliard,Ohio,43026,Enabled,Enabled,Enabled,Enabled,Yes,Yes,No,NULL,"2026-09-17 15:36:47","2026-09-17 15:41:48"
+277913,904,Robert,Wilcock,1962-03-16,Male,robertbwilcock@gmail.com,+1(435)922-1000,+1(435)922-1000,"6454 Castle Road",Johnstown,Ohio,43031,Enabled,Enabled,Enabled,Enabled,Yes,Yes,No,"922/26 sent Fullscript labs to his email with vitamins, no insurance and Labcorp too costly
+1st visit - send emails to his wife Kathy Wilcock
+NKDA","2026-09-08 11:35:56","2026-09-22 15:59:22"
+277708,904,Nicole,Harris,1982-07-26,Female,Nicoleharris626@yahoo.com,+1(614)458-8578,+1(614)458-8578,"1091 Crestview Street",Reynoldsburg,Ohio,43068,Enabled,Enabled,Enabled,Enabled,Yes,Yes,No,"B12 shots, platelets, wt gain - gut health
+brain thing /wiring? 
+Functional Neurological Disorder Carvalopa/Levadopa, got covid twice but no covid injection, 44 yrs old","2026-09-03 19:29:52","2026-09-08 12:36:18"

@@ -32,6 +32,9 @@ config/settings.yaml
 config/*.yaml
 
 # Patient lists / PHI
+patient_lists/*
+!patient_lists/.gitkeep
+!patient_lists/*sample*
 *Patients.csv
 Facility*.csv
 
