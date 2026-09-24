@@ -26,10 +26,11 @@ logs/
 checkpoints/
 downloads/
 
-# Credentials and config
+# Credentials and config (real files stay local; commit *.example.yaml only)
 config/credentials.yaml
 config/settings.yaml
 config/*.yaml
+!config/credentials.example.yaml
 
 # Patient lists / PHI (keep folder, never commit list files)
 patient_lists/*
