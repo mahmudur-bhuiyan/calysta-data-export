@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Checkpoints and downloads
+checkpoints/
+downloads/
+
+# Credentials and config
+config/credentials.yaml
+config/settings.yaml
+config/*.yaml
+
+# Patient lists / PHI
+*Patients.csv
+Facility*.csv
+
+# Jupyter Notebooks
+*.ipynb
+
+# Misc
+*.bak
+*.tmp
+
+node_modules/
+.cache/
