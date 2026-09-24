@@ -31,12 +31,12 @@ config/credentials.yaml
 config/settings.yaml
 config/*.yaml
 
-# Patient lists / PHI
+# Patient lists / PHI (keep folder, never commit list files)
 patient_lists/*
 !patient_lists/.gitkeep
-!patient_lists/*sample*
-*Patients.csv
-Facility*.csv
+
+# CSV files — patient lists, exports, reports (never commit)
+*.csv
 
 # Jupyter Notebooks
 *.ipynb
