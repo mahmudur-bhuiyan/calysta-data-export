@@ -31,6 +31,7 @@ config/credentials.yaml
 config/settings.yaml
 config/*.yaml
 !config/credentials.example.yaml
+!config/settings.example.yaml
 
 # Patient lists / PHI (keep folder, never commit list files)
 patient_lists/*

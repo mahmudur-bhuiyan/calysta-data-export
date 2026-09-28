@@ -1,0 +1,33 @@
+# Copy to settings.yaml and adjust as needed (settings.yaml is gitignored).
+browser_mode: headless   # or headed
+page_timeout: 60000
+base_url: https://www.calystaproemr.com
+viewport:
+  width: 1725
+  height: 973
+
+# Parallel browsers (each logs in and processes a patient shard)
+worker_count: 5
+# Rows per list page (?count=) for images / encounters / consents / invoices
+per_page: 50
+# Stagger worker logins to reduce portal contention (seconds * worker_index)
+worker_login_stagger_sec: 2
+# Recycle each worker browser every N processed patients (0 = never). Helps RAM.
+recycle_browser_every_n_patients: 40
+
+# Unattended supervisor (python src/watch_export.py)
+supervisor:
+  idle_timeout_sec: 900          # restart if log silent this long
+  poll_interval_sec: 30
+  crash_hit_threshold: 8         # pattern hits within crash_window_sec → restart
+  crash_window_sec: 120
+  worker_start: 5
+  worker_min: 2
+  worker_backoff: [5, 3, 2]      # step down after MemoryError / browser death
+  max_restarts: 40
+  restart_cooldown_sec: 20
+  # Optional fixed log path; otherwise <Facility>_supervised.log in project root
+  # log_file: bg_dose_export.log
+
+# Resume from this patient id (leave empty or remove to start from beginning)
+# start_from_patient_id: ""
