@@ -12,6 +12,11 @@ from main import (
     to_pascalcase,
 )
 from export_index import read_index_rows, summarize_index, write_export_index
+from facility_paths import (
+    ensure_facility_layout,
+    resolve_export_index_path,
+    resolve_patients_base,
+)
 
 
 def main():
@@ -28,8 +33,14 @@ def main():
         return
 
     facility_folder = sanitize_facility_folder_name(facility_name)
-    base_downloads_path = os.path.join(DOWNLOADS_ROOT, facility_folder)
-    out = write_export_index(patient_data, base_downloads_path, to_pascalcase)
+    ensure_facility_layout(facility_folder)
+    base_downloads_path = resolve_patients_base(facility_folder)
+    out = write_export_index(
+        patient_data,
+        base_downloads_path,
+        to_pascalcase,
+        path=resolve_export_index_path(facility_folder),
+    )
     summary = summarize_index(read_index_rows(out))
     print(f"Export index: {out}")
     print(

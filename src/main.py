@@ -15,7 +15,6 @@ from service_history_downloader import download_service_history
 from sms_log_downloader import download_sms_log
 from patient_details_downloader import download_patient_details
 from logger import init_logger, get_logger
-from report_generator import generate_execution_report
 from download_ledger import count_content_files, LEDGER_FILENAME
 from export_status import (
     CATEGORY_DETAILS,
@@ -33,8 +32,14 @@ from export_status import (
     mark_category,
 )
 from progress_report import generate_progress_report
-from client_delivery_report import generate_client_delivery_report
-from export_index import ExportIndex, index_path
+from export_index import ExportIndex
+from facility_paths import (
+    copy_patient_list_to_master_data,
+    delivery_report_dir,
+    ensure_facility_layout,
+    resolve_export_index_path,
+    resolve_patients_base,
+)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config')
@@ -501,13 +506,6 @@ def load_patient_data(csv_path):
                     'id': patient_id,
                     'first_name': first_name,
                     'last_name': last_name,
-                    # Optional contact fields for client delivery report / search
-                    'email': (row.get('email') or '').strip(),
-                    'work_phone': (row.get('work_phone') or '').strip(),
-                    'home_phone': (row.get('home_phone') or '').strip(),
-                    'cell_phone': (
-                        (row.get('cell_phone') or row.get('work_phone') or '').strip()
-                    ),
                 })
     return patient_data
 
@@ -579,12 +577,11 @@ async def run_worker_pool(
     patients, worker_count, credentials, settings, base_downloads_path,
     per_page, log, list_total, position_base, phase_label, export_index=None,
 ):
-    """Shard patients and run workers; returns merged outcome counts/rows."""
+    """Shard patients and run workers; returns merged outcome counts."""
     empty = {
         'processed': 0,
         'skipped': 0,
         'files_downloaded': 0,
-        'report_rows': [],
     }
     if not patients:
         return empty
@@ -625,7 +622,6 @@ async def run_worker_pool(
         'processed': 0,
         'skipped': 0,
         'files_downloaded': 0,
-        'report_rows': [],
     }
     for i, outcome in enumerate(outcomes):
         if isinstance(outcome, Exception):
@@ -634,27 +630,7 @@ async def run_worker_pool(
         merged['processed'] += outcome['processed']
         merged['skipped'] += outcome['skipped']
         merged['files_downloaded'] += outcome['files_downloaded']
-        merged['report_rows'].extend(outcome['report_rows'])
     return merged
-
-
-def _failed_report_row(patient_id, full_name):
-    return {
-        'patient_id': patient_id,
-        'patient_name': full_name,
-        'status': 'Failed',
-        'patient_details': 0,
-        'encounters': 0,
-        'consent_forms': 0,
-        'invoices': 0,
-        'images': 0,
-        'membership_invoices': 0,
-        'appointment_history': 0,
-        'available_credits': 0,
-        'service_history': 0,
-        'sms_log': 0,
-        'total_files': 0,
-    }
 
 
 async def _update_export_index(export_index, patient, base_downloads_path):
@@ -668,8 +644,7 @@ async def process_one_patient(
 ):
     """
     Export all document types for one patient.
-    Returns (report_row | None, files_added, skipped).
-    report_row is None when patient was skipped as already complete.
+    Returns (files_added, skipped).
     Resumes incomplete patients; skips categories already marked done in .export_status.json.
     """
     patient_id = patient['id']
@@ -703,7 +678,7 @@ async def process_one_patient(
         if not has_new_records:
             log.patient_skipped(patient_id, first_name, last_name, worker_id=worker_id)
             await _update_export_index(export_index, patient, base_downloads_path)
-            return None, 0, True
+            return 0, True
         log.warning(f"[W{worker_id}] Patient has new records - re-downloading")
     elif os.path.exists(patient_folder_path):
         log.info(
@@ -917,25 +892,8 @@ async def process_one_patient(
             + images_count + membership_count + appointment_count
             + credits_count + service_count + sms_count
         )
-        export_complete = patient_already_processed(patient_folder_path)
-        report_row = {
-            'patient_id': patient_id,
-            'patient_name': full_name,
-            'status': 'Completed' if export_complete else 'Partial',
-            'patient_details': details_count,
-            'encounters': encounter_count,
-            'consent_forms': consent_count,
-            'invoices': invoice_count,
-            'images': images_count,
-            'membership_invoices': membership_count,
-            'appointment_history': appointment_count,
-            'available_credits': credits_count,
-            'service_history': service_count,
-            'sms_log': sms_count,
-            'total_files': total_files,
-        }
         await _update_export_index(export_index, patient, base_downloads_path)
-        return report_row, total_files, False
+        return total_files, False
 
     except Exception as e:
         log.error(
@@ -943,7 +901,7 @@ async def process_one_patient(
             f"({first_name} {last_name}): {e}"
         )
         await _update_export_index(export_index, patient, base_downloads_path)
-        return _failed_report_row(patient_id, full_name), 0, False
+        return 0, False
 
 
 async def worker(
@@ -952,7 +910,7 @@ async def worker(
 ):
     """
     One browser session processing a contiguous patient shard.
-    Returns dict with report rows and counts.
+    Returns dict with counts.
     """
     stagger = int(settings.get('worker_login_stagger_sec', 3) or 0) * (worker_id - 1)
     if stagger:
@@ -970,7 +928,6 @@ async def worker(
     )
     log.success(f"[W{worker_id}] Authentication successful")
 
-    report_rows = []
     files_downloaded = 0
     skipped = 0
     processed = 0
@@ -979,7 +936,7 @@ async def worker(
     try:
         for i, patient in enumerate(patients):
             list_position = position_offset + i + 1
-            row, files_added, was_skipped = await process_one_patient(
+            files_added, was_skipped = await process_one_patient(
                 page, patient, base_downloads_path, per_page, log,
                 list_position, list_total, worker_id, export_index,
             )
@@ -988,8 +945,6 @@ async def worker(
                 continue
             processed += 1
             files_downloaded += files_added
-            if row:
-                report_rows.append(row)
 
             # Periodic browser recycle to limit RAM growth on long overnight runs
             if (
@@ -1030,7 +985,6 @@ async def worker(
 
     return {
         'worker_id': worker_id,
-        'report_rows': report_rows,
         'processed': processed,
         'skipped': skipped,
         'files_downloaded': files_downloaded,
@@ -1086,8 +1040,9 @@ async def main():
         return
 
     facility_folder = sanitize_facility_folder_name(facility_name)
-    base_downloads_path = os.path.join(DOWNLOADS_ROOT, facility_folder)
-    os.makedirs(base_downloads_path, exist_ok=True)
+    ensure_facility_layout(facility_folder)
+    base_downloads_path = resolve_patients_base(facility_folder)
+    copy_patient_list_to_master_data(facility_folder, csv_path)
 
     worker_count = max(1, int(settings.get('worker_count', 1) or 1))
     # Supervisor can override via EXPORT_WORKER_COUNT (adaptive 5→3→2)
@@ -1099,11 +1054,12 @@ async def main():
 
     log.section("STARTING FACILITY DOCUMENT DOWNLOAD")
     log.info(f"Facility: {facility_name}")
-    log.info(f"Output folder: {base_downloads_path}")
+    log.info(f"Facility folder: {os.path.join(DOWNLOADS_ROOT, facility_folder)}")
+    log.info(f"Patient records: {base_downloads_path}")
     log.info(f"Patients to process: {len(patient_data)}")
     log.info(f"Workers: {worker_count} | per_page: {per_page}")
 
-    export_index = ExportIndex(index_path(base_downloads_path))
+    export_index = ExportIndex(resolve_export_index_path(facility_folder))
     index_summary = export_index.initialize(patient_data, base_downloads_path, to_pascalcase)
     log.info(
         f"Export index CSV: {export_index.path} "
@@ -1151,7 +1107,6 @@ async def main():
     processed_count = 0
     skipped_count = start_index + len(already_complete)
     total_files_downloaded = 0
-    patients_report_data = []
 
     # Phase 1: finish every crash-interrupted / partial patient before any new ones
     phase1 = await run_worker_pool(
@@ -1170,7 +1125,6 @@ async def main():
     processed_count += phase1['processed']
     skipped_count += phase1['skipped']
     total_files_downloaded += phase1['files_downloaded']
-    patients_report_data.extend(phase1['report_rows'])
 
     # Phase 2: only patients that never had a download folder
     phase2 = await run_worker_pool(
@@ -1189,59 +1143,26 @@ async def main():
     processed_count += phase2['processed']
     skipped_count += phase2['skipped']
     total_files_downloaded += phase2['files_downloaded']
-    patients_report_data.extend(phase2['report_rows'])
 
     log.summary(len(patient_data), processed_count, skipped_count, total_files_downloaded)
-
-    # Generate HTML execution report
-    log.info("Generating execution report...")
-    reports_dir = os.path.join(DOWNLOADS_ROOT, 'reports')
-    os.makedirs(reports_dir, exist_ok=True)
-
-    facility_name_safe = sanitize_facility_folder_name(facility_name).replace(' ', '_')
-    facility_name_safe = facility_name_safe.replace('(', '').replace(')', '')
-
-    from datetime import datetime
-    report_date = datetime.now().strftime('%m-%d-%Y')
-    report_filename = f"{facility_name_safe}_Export_Report_{report_date}.html"
-
-    report_data = {
-        'facility_name': facility_name,
-        'total_patients': len(patient_data),
-        'processed_patients': processed_count,
-        'skipped_patients': skipped_count,
-        'total_files_downloaded': total_files_downloaded,
-        'patients': patients_report_data,
-    }
-
-    report_path = generate_execution_report(report_data, reports_dir, report_filename)
-    log.success(f"Report generated: {report_path}")
 
     log.info("Generating facility progress report (all patients in CSV)...")
     facility_safe = sanitize_facility_folder_name(facility_name).replace(' ', '_')
     facility_safe = facility_safe.replace('(', '').replace(')', '')
+    delivery_dir = delivery_report_dir(facility_folder)
+    os.makedirs(delivery_dir, exist_ok=True)
+    from datetime import datetime
+    report_date = datetime.now().strftime('%m-%d-%Y')
     progress_filename = f"{facility_safe}_Export_Progress_{report_date}.html"
     progress_path = generate_progress_report(
         facility_name=facility_name,
         patient_data=patient_data,
         base_downloads_path=base_downloads_path,
-        output_dir=reports_dir,
+        output_dir=delivery_dir,
         to_pascalcase=to_pascalcase,
         custom_filename=progress_filename,
     )
     log.success(f"Progress report generated: {progress_path}")
-
-    log.info("Generating client-facing delivery report...")
-    client_filename = f"{facility_safe}_Client_Delivery_Report_{report_date}.html"
-    client_path = generate_client_delivery_report(
-        facility_name=facility_name,
-        patient_data=patient_data,
-        base_downloads_path=base_downloads_path,
-        output_dir=reports_dir,
-        to_pascalcase=to_pascalcase,
-        custom_filename=client_filename,
-    )
-    log.success(f"Client delivery report generated: {client_path}")
 
 if __name__ == "__main__":
     asyncio.run(main())

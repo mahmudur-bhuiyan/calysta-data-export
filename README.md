@@ -21,7 +21,7 @@ For each patient in the input CSV (`id`, `first_name`, `last_name`), the exporte
 
 Also generated after each run:
 
-- HTML execution report under `downloads/reports/`
+- HTML progress report under `<Facility Name> - Delivery Report/`
 - Detailed log under `downloads/logs/`
 
 ## Output folder arrangement
@@ -29,26 +29,27 @@ Also generated after each run:
 Root path:
 
 ```text
-downloads/<Facility Name>/
-└── {PatientId}_{FirstName}_{LastName}/
-    ├── 01_Patient_Details/
-    ├── 02_Patient_Images/
-    ├── 03_Appointment_History/
-    ├── 04_Service_History/
-    ├── 05_Encounter_History/
-    ├── 06_Consent_Form_History/
-    ├── 07_Patient_Invoices/
-    ├── 08_Membership_Invoices/
-    ├── 09_Available_Credits/
-    └── 10_SMS_Log_History/
+downloads/
+├── logs/
+└── <Facility Name>/
+    ├── <Facility Name> - Master Data/
+    │   ├── export_index.csv
+    │   └── <patient list CSV copy>
+    ├── <Facility Name> - Patients Records/
+    │   └── {PatientId}_{FirstName}_{LastName}/
+    │       ├── 01_Patient_Details/
+    │       ├── 02_Patient_Images/
+    │       … (10 category folders per patient)
+    └── <Facility Name> - Delivery Report/
+        └── …_Export_Progress_MM-DD-YYYY.html
 ```
 
-Numeric prefixes keep this order when folders are sorted by name.
+The progress HTML report is written under **Delivery Report**.
 
 ### Example patient folder
 
 ```text
-downloads/Facility One(QA)/
+downloads/Reborn Health & Aesthetics/Reborn Health & Aesthetics - Patients Records/
 └── 272300_Zensen_Shen/
     ├── 01_Patient_Details/
     │   └── Zensen Shen_details.csv
@@ -139,7 +140,7 @@ On startup the exporter:
 1. Scans `patient_lists/` for valid patient CSVs only
 2. Selects the file whose **filename matches** the `facility` from `credentials.yaml` (spaces, hyphens, and underscores are ignored when matching)
 3. If no file matches, the run stops with a clear error listing what was found
-4. Writes exports under `downloads/<Facility Name>/`
+4. Writes exports under `downloads/<Facility Name>/` with **Master Data**, **Patients Records**, and **Delivery Report** subfolders
 
 Example layout:
 

@@ -1,8 +1,7 @@
-"""Facility progress HTML report — done/pending + per-folder audit table + charts."""
+"""Facility progress HTML report — done/pending + per-folder audit table."""
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime
 from typing import Any, Dict, List
@@ -76,18 +75,6 @@ def generate_progress_report(
 
     out_path = os.path.join(output_dir, custom_filename)
 
-    # Category completion counts for bar chart
-    cat_done = []
-    cat_labels = []
-    for cat in ALL_CATEGORIES:
-        cat_labels.append(CATEGORY_SHORT[cat])
-        done_n = 0
-        for r in rows:
-            st = (r["categories"].get(cat) or {}).get("state")
-            if st in ("done", "done_empty"):
-                done_n += 1
-        cat_done.append(done_n)
-
     table_rows_html = []
     for r in rows:
         status = r["status"]
@@ -127,16 +114,6 @@ def generate_progress_report(
         for cat in ALL_CATEGORIES
     )
 
-    chart_status = json.dumps([
-        summary["complete"],
-        summary["partial"],
-        summary["pending"],
-        summary["failed"],
-    ])
-    chart_cat_labels = json.dumps(cat_labels)
-    chart_cat_done = json.dumps(cat_done)
-    chart_cat_total = json.dumps([summary["total"]] * len(ALL_CATEGORIES))
-
     generated = datetime.now().strftime("%B %d, %Y at %I:%M %p")
 
     html = f"""<!DOCTYPE html>
@@ -145,7 +122,6 @@ def generate_progress_report(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{_esc(facility_name)} — Export Progress</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     :root {{
       --bg: #f4f7fb;
@@ -222,20 +198,6 @@ def generate_progress_report(
       border-radius: 999px;
       transition: width 0.4s ease;
     }}
-    .charts {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 16px;
-      margin-bottom: 22px;
-    }}
-    .chart-card {{
-      background: var(--card);
-      border-radius: 14px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      min-height: 320px;
-    }}
-    .chart-card h2 {{ margin: 0 0 12px; font-size: 1.05rem; }}
     .toolbar {{
       display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
       margin-bottom: 12px;
@@ -334,17 +296,6 @@ def generate_progress_report(
       </div>
     </div>
 
-    <div class="charts">
-      <div class="chart-card">
-        <h2>Patient status</h2>
-        <canvas id="statusChart" height="220"></canvas>
-      </div>
-      <div class="chart-card">
-        <h2>Category completion (patients done)</h2>
-        <canvas id="categoryChart" height="220"></canvas>
-      </div>
-    </div>
-
     <div class="toolbar">
       <strong>Filter:</strong>
       <button type="button" class="active" data-filter="all">All</button>
@@ -377,54 +328,6 @@ def generate_progress_report(
   </div>
 
   <script>
-    const statusData = {chart_status};
-    const catLabels = {chart_cat_labels};
-    const catDone = {chart_cat_done};
-    const catTotal = {chart_cat_total};
-
-    new Chart(document.getElementById('statusChart'), {{
-      type: 'doughnut',
-      data: {{
-        labels: ['Complete', 'Partial', 'Pending', 'Failed'],
-        datasets: [{{
-          data: statusData,
-          backgroundColor: ['#1b7f4e', '#b45309', '#94a3b8', '#b91c1c'],
-          borderWidth: 0
-        }}]
-      }},
-      options: {{
-        plugins: {{ legend: {{ position: 'bottom' }} }},
-        cutout: '58%'
-      }}
-    }});
-
-    new Chart(document.getElementById('categoryChart'), {{
-      type: 'bar',
-      data: {{
-        labels: catLabels,
-        datasets: [
-          {{
-            label: 'Done',
-            data: catDone,
-            backgroundColor: '#0f4c81'
-          }},
-          {{
-            label: 'Remaining',
-            data: catTotal.map((t, i) => Math.max(0, t - catDone[i])),
-            backgroundColor: '#e2e8f0'
-          }}
-        ]
-      }},
-      options: {{
-        responsive: true,
-        scales: {{
-          x: {{ stacked: true }},
-          y: {{ stacked: true, beginAtZero: true, ticks: {{ precision: 0 }} }}
-        }},
-        plugins: {{ legend: {{ position: 'bottom' }} }}
-      }}
-    }});
-
     document.querySelectorAll('.toolbar button').forEach(btn => {{
       btn.addEventListener('click', () => {{
         document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active'));

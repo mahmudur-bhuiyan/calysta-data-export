@@ -12,6 +12,11 @@ from main import (
     to_pascalcase,
 )
 from progress_report import generate_progress_report
+from facility_paths import (
+    delivery_report_dir,
+    ensure_facility_layout,
+    resolve_patients_base,
+)
 from datetime import datetime
 
 def main():
@@ -24,9 +29,10 @@ def main():
 
     patient_data = load_patient_data(csv_path)
     facility_folder = sanitize_facility_folder_name(facility_name)
-    base_downloads_path = os.path.join(DOWNLOADS_ROOT, facility_folder)
-    reports_dir = os.path.join(DOWNLOADS_ROOT, "reports")
-    os.makedirs(reports_dir, exist_ok=True)
+    ensure_facility_layout(facility_folder)
+    base_downloads_path = resolve_patients_base(facility_folder)
+    output_dir = delivery_report_dir(facility_folder)
+    os.makedirs(output_dir, exist_ok=True)
 
     safe = facility_folder.replace(" ", "_").replace("(", "").replace(")", "")
     filename = f"{safe}_Export_Progress_{datetime.now().strftime('%m-%d-%Y')}.html"
@@ -34,7 +40,7 @@ def main():
         facility_name=facility_name,
         patient_data=patient_data,
         base_downloads_path=base_downloads_path,
-        output_dir=reports_dir,
+        output_dir=output_dir,
         to_pascalcase=to_pascalcase,
         custom_filename=filename,
     )

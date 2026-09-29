@@ -62,6 +62,18 @@ def _preflight() -> int:
     print(f"Facility: {facility}", flush=True)
     print(f"Patient list: {os.path.basename(csv_path)}", flush=True)
     print(f"Output: downloads/{facility}/", flush=True)
+    print(
+        f"  ├── {facility} - Master Data/",
+        flush=True,
+    )
+    print(
+        f"  ├── {facility} - Patients Records/",
+        flush=True,
+    )
+    print(
+        f"  └── {facility} - Delivery Report/",
+        flush=True,
+    )
     print("Starting export...\n", flush=True)
     return 0
 

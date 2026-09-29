@@ -215,13 +215,13 @@ def export_fully_complete() -> Optional[bool]:
         sys.path.insert(0, SCRIPT_DIR)
         from main import (
             CONFIG_PATH as MAIN_CONFIG,
-            DOWNLOADS_ROOT,
             load_yaml,
             load_patient_data,
             select_patient_csv,
             sanitize_facility_folder_name,
             partition_patients_by_progress,
         )
+        from facility_paths import resolve_patients_base
 
         credentials = load_yaml(os.path.join(MAIN_CONFIG, "credentials.yaml"))
         facility = credentials.get("facility", "Facility")
@@ -229,7 +229,7 @@ def export_fully_complete() -> Optional[bool]:
         if not csv_path:
             return None
         patients = load_patient_data(csv_path)
-        base = os.path.join(DOWNLOADS_ROOT, sanitize_facility_folder_name(facility))
+        base = resolve_patients_base(sanitize_facility_folder_name(facility))
         incomplete, not_started, _done = partition_patients_by_progress(patients, base)
         return len(incomplete) == 0 and len(not_started) == 0
     except Exception as e:
