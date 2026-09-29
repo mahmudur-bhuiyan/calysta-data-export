@@ -222,6 +222,16 @@ def cleanup_empty_folders_in_base(base_downloads_path: str) -> Tuple[int, int]:
     return patients_touched, folders_removed
 
 
+def reset_category(patient_folder: str, category: str) -> None:
+    """Mark one category pending so a selective re-export will run it again."""
+    status = load_export_status(patient_folder)
+    cats = status["categories"]
+    cats[category] = {"state": STATUS_PENDING, "files": 0, "label": "pending"}
+    status["categories"] = cats
+    status["complete"] = False
+    save_export_status(patient_folder, status)
+
+
 def mark_category(
     patient_folder: str,
     category: str,
