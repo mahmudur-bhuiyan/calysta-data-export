@@ -96,13 +96,17 @@ def resolve_patients_base(facility_folder: str) -> str:
 
 
 def resolve_export_index_path(facility_folder: str) -> str:
-    """export_index.csv path (Master Data for new exports; legacy root fallback)."""
-    new_path = os.path.join(master_data_dir(facility_folder), INDEX_FILENAME)
-    legacy_path = os.path.join(facility_root(facility_folder), INDEX_FILENAME)
+    """export_index.csv path (Patients Records; legacy Master Data / root fallback)."""
+    new_path = os.path.join(patients_records_dir(facility_folder), INDEX_FILENAME)
+    legacy_paths = (
+        os.path.join(master_data_dir(facility_folder), INDEX_FILENAME),
+        os.path.join(facility_root(facility_folder), INDEX_FILENAME),
+    )
     if os.path.isfile(new_path):
         return new_path
-    if os.path.isfile(legacy_path):
-        return legacy_path
+    for legacy_path in legacy_paths:
+        if os.path.isfile(legacy_path):
+            return legacy_path
     return new_path
 
 
@@ -150,7 +154,10 @@ def migrate_legacy_facility_layout(facility_folder: str) -> Dict[str, int]:
                 shutil.move(src, dest)
                 stats["patient_folders_moved"] += 1
             elif os.path.isfile(src) and name.lower().endswith(".csv"):
-                dest = os.path.join(paths["master_data"], name)
+                if name == INDEX_FILENAME:
+                    dest = os.path.join(paths["patients_records"], name)
+                else:
+                    dest = os.path.join(paths["master_data"], name)
                 if os.path.abspath(src) == os.path.abspath(dest):
                     stats["skipped"] += 1
                     continue

@@ -33,9 +33,9 @@ downloads/
 ├── logs/
 └── <Facility Name>/
     ├── <Facility Name> - Master Data/
-    │   ├── export_index.csv
     │   └── <patient list CSV copy>
     ├── <Facility Name> - Patients Records/
+    │   ├── export_index.csv
     │   └── {PatientId}_{FirstName}_{LastName}/
     │       ├── 01_Patient_Details/
     │       ├── 02_Patient_Images/
