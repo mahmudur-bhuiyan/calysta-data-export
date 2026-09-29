@@ -731,7 +731,11 @@ async def process_one_patient(
                 page, images_download_path,
                 patient_id=patient_id, per_page=per_page, patient_name=full_name,
             )
-            migrate_patient_image_folder(images_download_path)
+            migrate_patient_image_folder(
+                images_download_path,
+                patient_id=str(patient_id),
+                patient_name=full_name,
+            )
             images_count = count_files_in_folder(images_download_path)
             log.patient_download_complete('Image', images_count, full_name)
             mark_category(

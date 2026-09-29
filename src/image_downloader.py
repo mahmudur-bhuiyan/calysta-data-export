@@ -2,7 +2,6 @@
 
 import os
 import re
-from datetime import datetime, timedelta
 import yaml
 from image_selectors import DOWNLOAD_BUTTON, NEXT_BUTTON, LAST_BUTTON
 from download_ledger import (
@@ -14,118 +13,125 @@ from download_ledger import (
 from page_wait import goto_ready
 
 _PATIENT_IMAGE_PREFIX = re.compile(r"^patient\s+image\s+", re.IGNORECASE)
-_IMAGE_STEM_RE = re.compile(
-    r"^(?P<id>\d+)_(?P<name>.+)_(?P<date>\d{2}-\d{2}-\d{4})(?:_(?P<time>.+))?$",
+_SERVER_IMAGE_RE = re.compile(
+    r"^patient[_\s]+image[_\s]+(?P<image_id>\d+)$",
     re.IGNORECASE,
 )
-_TIMESTAMP_SUFFIX_RE = re.compile(r"^\d{2}_\d{2}_\d{2}$")
+_LEGACY_STEM_RE = re.compile(
+    r"^(?P<image_id>\d+)_(?P<name>.+)_(?P<date>\d{2}-\d{2}-\d{4})(?:_(?P<time>.+))?$",
+    re.IGNORECASE,
+)
+
+
+def split_patient_name(patient_name: str) -> tuple[str, str]:
+    """Split display name into lowercase first/last parts for filenames."""
+    parts = re.split(r"\s+", (patient_name or "").strip(), maxsplit=1)
+    first = parts[0].lower().replace(" ", "_") if parts and parts[0] else ""
+    last = parts[1].lower().replace(" ", "_") if len(parts) > 1 else ""
+    return first, last
+
+
+def parse_patient_folder_name(folder_name: str) -> tuple[str, str, str]:
+    """Parse `{id}_{First}_{Last}` folder names into id + lowercase name parts."""
+    if not folder_name:
+        return "", "", ""
+    parts = folder_name.split("_", 1)
+    if not parts or not parts[0].isdigit():
+        return "", "", ""
+    patient_id = parts[0]
+    name_parts = parts[1].split("_") if len(parts) > 1 and parts[1] else []
+    first = name_parts[0].lower() if name_parts else ""
+    last = name_parts[1].lower() if len(name_parts) > 1 else ""
+    return patient_id, first, last
 
 
 def parse_patient_image_stem(stem: str) -> dict | None:
-    match = _IMAGE_STEM_RE.match(stem)
-    if not match:
+    """Parse `first_last_patientId_imageId` (or `first_patientId_imageId`)."""
+    parts = stem.split("_")
+    if len(parts) < 3:
         return None
-    return match.groupdict()
+    image_id = parts[-1]
+    patient_id = parts[-2]
+    if not image_id.isdigit() or not patient_id.isdigit():
+        return None
+    name_parts = parts[:-2]
+    if not name_parts:
+        return None
+    first = name_parts[0].lower()
+    last = "_".join(name_parts[1:]).lower() if len(name_parts) > 1 else ""
+    return {
+        "first": first,
+        "last": last,
+        "patient_id": patient_id,
+        "image_id": image_id,
+    }
 
 
-def parse_time_text(text: str) -> datetime | None:
-    """Parse a time string from the portal row or legacy filename suffix."""
-    text = re.sub(r"\s+", " ", (text or "").strip())
-    if not text:
-        return None
-    if _TIMESTAMP_SUFFIX_RE.match(text):
-        try:
-            return datetime.strptime(text, "%H_%M_%S")
-        except ValueError:
-            return None
-    for fmt in ("%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
+def extract_image_id_from_stem(stem: str) -> str | None:
+    """Extract server image id from raw, legacy, or normalized filename stems."""
+    stem = _PATIENT_IMAGE_PREFIX.sub("", stem)
+    parsed = parse_patient_image_stem(stem)
+    if parsed:
+        return parsed["image_id"]
+
+    server_match = _SERVER_IMAGE_RE.match(stem)
+    if server_match:
+        return server_match.group("image_id")
+
+    legacy_match = _LEGACY_STEM_RE.match(stem)
+    if legacy_match:
+        return legacy_match.group("image_id")
     return None
 
 
-def format_time_for_filename(value: datetime) -> str:
-    """Format time as 24h timestamp: 16_04_26 (Windows-safe, no colons)."""
-    return value.strftime("%H_%M_%S")
-
-
 def build_patient_image_filename(
+    first: str,
+    last: str,
+    patient_id: str,
     image_id: str,
-    patient_name: str,
-    date_str: str,
     ext: str,
-    time_str: str | None = None,
 ) -> str:
-    base = f"{image_id}_{patient_name}_{date_str}"
-    if time_str:
-        base = f"{base}_{time_str}"
+    """Build `first_last_patientId_imageId.ext` (omit last when empty)."""
+    first = first.lower().replace(" ", "_")
+    last = last.lower().replace(" ", "_") if last else ""
+    if last:
+        base = f"{first}_{last}_{patient_id}_{image_id}"
+    else:
+        base = f"{first}_{patient_id}_{image_id}"
     return f"{base}{ext}"
 
 
 def normalize_patient_image_filename(
     filename: str,
     *,
-    time_str: str | None = None,
-    fallback_mtime: float | None = None,
+    patient_id: str,
+    patient_name: str | None = None,
+    first: str | None = None,
+    last: str | None = None,
 ) -> str:
-    """Normalize to id_name_date_HH_MM_SS.ext (strip 'patient image ' prefix)."""
-    if not filename:
+    """Normalize to first_last_patientId_imageId.ext from portal download names."""
+    if not filename or not patient_id:
         return filename
-    base = _PATIENT_IMAGE_PREFIX.sub("", os.path.basename(filename))
-    stem, ext = os.path.splitext(base)
+
+    base = os.path.basename(filename)
+    stem, ext = os.path.splitext(_PATIENT_IMAGE_PREFIX.sub("", base))
+
+    if first is None or last is None:
+        parsed_first, parsed_last = split_patient_name(patient_name or "")
+        first = first if first is not None else parsed_first
+        last = last if last is not None else parsed_last
+
     parsed = parse_patient_image_stem(stem)
-    if not parsed:
-        return base
+    if parsed and parsed["patient_id"] == patient_id:
+        if parsed["first"] == first and parsed["last"] == last:
+            return base
+        image_id = parsed["image_id"]
+    else:
+        image_id = extract_image_id_from_stem(stem)
+        if not image_id:
+            return base
 
-    time_part = time_str
-    if not time_part and parsed.get("time"):
-        parsed_time = parse_time_text(parsed["time"])
-        if parsed_time and _TIMESTAMP_SUFFIX_RE.match(parsed["time"]):
-            time_part = parsed["time"]
-        elif parsed_time:
-            time_part = format_time_for_filename(parsed_time)
-    if not time_part and fallback_mtime is not None:
-        time_part = format_time_for_filename(datetime.fromtimestamp(fallback_mtime))
-
-    return build_patient_image_filename(
-        parsed["id"],
-        parsed["name"],
-        parsed["date"],
-        ext,
-        time_part,
-    )
-
-
-def _assign_unique_timestamps(
-    entries: list[tuple[str, float, dict]],
-) -> dict[str, str]:
-    """
-    Map filename -> HH_MM_SS suffix.
-    Uses file mtime as base; increments seconds until each suffix is unique.
-    """
-    used: set[str] = set()
-    result: dict[str, str] = {}
-    for name, mtime, parsed in sorted(
-        entries,
-        key=lambda item: (item[1], int(item[2]["id"]), item[0]),
-    ):
-        dt = datetime.fromtimestamp(mtime)
-        time_str = format_time_for_filename(dt)
-        while time_str in used:
-            dt += timedelta(seconds=1)
-            time_str = format_time_for_filename(dt)
-        used.add(time_str)
-        result[name] = time_str
-    return result
-
-
-def _folder_needs_time_migration(folder_path: str, entries: list[tuple[str, dict]]) -> bool:
-    times = [parsed.get("time") or "" for _, parsed in entries]
-    if not all(_TIMESTAMP_SUFFIX_RE.match(t) for t in times):
-        return True
-    return len(times) != len(set(times))
+    return build_patient_image_filename(first, last, patient_id, image_id, ext)
 
 
 def _unique_path(folder_path: str, filename: str) -> str:
@@ -143,48 +149,48 @@ def _unique_path(folder_path: str, filename: str) -> str:
         counter += 1
 
 
-def migrate_patient_image_folder(folder_path: str) -> int:
-    """Ensure id_name_date_HH_MM_SS.ext with unique timestamps per folder."""
+def migrate_patient_image_folder(
+    folder_path: str,
+    *,
+    patient_id: str | None = None,
+    patient_name: str | None = None,
+) -> int:
+    """Rename images in a folder to first_last_patientId_imageId.ext."""
     if not os.path.isdir(folder_path):
         return 0
 
-    entries: list[tuple[str, float, dict]] = []
-    for name in os.listdir(folder_path):
+    if not patient_id:
+        parent_name = os.path.basename(os.path.dirname(folder_path))
+        patient_id, folder_first, folder_last = parse_patient_folder_name(parent_name)
+    else:
+        folder_first, folder_last = "", ""
+
+    first, last = split_patient_name(patient_name or "")
+    if not first:
+        first = folder_first
+    if not last:
+        last = folder_last
+
+    if not patient_id or not first:
+        return 0
+
+    renamed = 0
+    for name in sorted(os.listdir(folder_path)):
         if name.startswith(".") or name == LEDGER_FILENAME:
             continue
         src = os.path.join(folder_path, name)
         if not os.path.isfile(src):
             continue
-        stem, _ = os.path.splitext(name)
-        parsed = parse_patient_image_stem(_PATIENT_IMAGE_PREFIX.sub("", stem))
-        if not parsed:
-            continue
-        entries.append((name, os.path.getmtime(src), parsed))
 
-    if not entries:
-        return 0
-
-    parsed_only = [(name, parsed) for name, _, parsed in entries]
-    if not _folder_needs_time_migration(folder_path, parsed_only):
-        return 0
-
-    time_by_name = _assign_unique_timestamps(entries)
-    renamed = 0
-    for name, mtime, parsed in entries:
-        time_str = time_by_name[name]
-        if parsed.get("time") == time_str:
-            continue
-        ext = os.path.splitext(name)[1]
-        new_name = build_patient_image_filename(
-            parsed["id"],
-            parsed["name"],
-            parsed["date"],
-            ext,
-            time_str,
+        new_name = normalize_patient_image_filename(
+            name,
+            patient_id=patient_id,
+            first=first,
+            last=last,
         )
         if new_name == name:
             continue
-        src = os.path.join(folder_path, name)
+
         dst = _unique_path(folder_path, new_name)
         os.rename(src, dst)
         renamed += 1
@@ -228,32 +234,6 @@ async def _resolve_item_key(btn, current_page, idx):
     return normalize_item_key(href) or f"image-page{current_page}-idx{idx}"
 
 
-async def _extract_row_datetime(btn) -> str | None:
-    """Read upload/capture time from the list row containing the download button."""
-    try:
-        raw = await btn.evaluate(
-            """(el) => {
-                const row = el.closest('tr');
-                if (!row) return null;
-                const text = (row.innerText || '').replace(/\\s+/g, ' ').trim();
-                const m12 = text.match(
-                    /\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4}\\s+(\\d{1,2}:\\d{2}(?::\\d{2})?\\s*[AP]M)/i
-                );
-                if (m12) return m12[1];
-                const m24 = text.match(
-                    /\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4}\\s+(\\d{1,2}:\\d{2}(?::\\d{2})?)\\b/
-                );
-                return m24 ? m24[1] : null;
-            }"""
-        )
-    except Exception:
-        raw = None
-    parsed = parse_time_text(raw)
-    if not parsed:
-        return None
-    return format_time_for_filename(parsed)
-
-
 async def download_patient_images(page, download_dir, patient_id="233957", per_page=10, patient_name=None):
     """
     Downloads all patient images from the images list page.
@@ -262,7 +242,8 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
     settings = load_settings()
     page_timeout = settings.get('page_timeout', 60000)
     os.makedirs(download_dir, exist_ok=True)
-    
+    first, last = split_patient_name(patient_name or "")
+
     list_page_url = f"https://www.calystaproemr.com/patient-images/index/{patient_id}?count={per_page}&page=1"
     current_page = 1
     total_downloaded = 0
@@ -271,7 +252,7 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
     while True:
         url = list_page_url.replace("page=1", f"page={current_page}")
         print(f"[IMAGES] Navigating to list page {current_page}: {url}")
-        
+
         try:
             await goto_ready(page, url, DOWNLOAD_BUTTON, timeout=page_timeout)
         except Exception as e:
@@ -284,11 +265,11 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
         except Exception as e:
             print(f"[IMAGES] Error finding download buttons: {e}")
             break
-        
+
         if len(download_buttons) == 0:
             print(f"[IMAGES] No images found for patient {patient_id}")
             break
-        
+
         for idx, btn in enumerate(download_buttons):
             key = await _resolve_item_key(btn, current_page, idx)
             if is_downloaded(download_dir, key):
@@ -297,22 +278,23 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
                 continue
 
             try:
-                row_time = await _extract_row_datetime(btn)
                 async with page.expect_download() as download_info:
                     await btn.click()
-                
+
                 download = await download_info.value
                 original_filename = download.suggested_filename
                 save_filename = normalize_patient_image_filename(
                     original_filename,
-                    time_str=row_time,
-                    fallback_mtime=datetime.now().timestamp(),
+                    patient_id=str(patient_id),
+                    patient_name=patient_name,
+                    first=first,
+                    last=last,
                 )
                 save_path = _unique_path(download_dir, save_filename)
-                
+
                 if os.path.basename(save_path) != save_filename:
                     print(f"[IMAGES] Using unique name: {os.path.basename(save_path)}")
-                
+
                 if os.path.exists(save_path):
                     print(f"[IMAGES] File already exists, skipping save: {os.path.basename(save_path)}")
                     mark_downloaded(download_dir, key)
@@ -323,7 +305,7 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
                     except Exception:
                         pass
                     continue
-                
+
                 await download.save_as(save_path)
                 mark_downloaded(download_dir, key)
                 mark_downloaded(download_dir, normalize_item_key(os.path.basename(save_path)))
@@ -332,7 +314,7 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
                     print(f"[IMAGES] Saved: {os.path.basename(save_path)}")
                 except Exception:
                     pass
-                
+
             except Exception as e:
                 try:
                     print(f"[IMAGES] Error downloading image {idx+1}: {e}")
@@ -342,21 +324,25 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
         try:
             next_btn = await page.query_selector(NEXT_BUTTON)
             last_btn = await page.query_selector(LAST_BUTTON)
-            
+
             if not next_btn or not last_btn:
                 print(f"[IMAGES] No pagination buttons found. Ending download.")
                 break
-            
+
             if not await next_btn.is_visible():
                 print(f"[IMAGES] Next button not visible. Ending download.")
                 break
-            
+
             current_page += 1
         except Exception as e:
             print(f"[IMAGES] Error checking pagination: {e}")
             break
 
-    migrate_patient_image_folder(download_dir)
-    
+    migrate_patient_image_folder(
+        download_dir,
+        patient_id=str(patient_id),
+        patient_name=patient_name,
+    )
+
     print(f"[IMAGES] Downloaded {total_downloaded}, skipped existing {total_skipped}")
     return total_downloaded
