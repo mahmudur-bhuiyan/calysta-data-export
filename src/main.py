@@ -34,6 +34,7 @@ from export_status import (
 )
 from progress_report import generate_progress_report
 from client_delivery_report import generate_client_delivery_report
+from export_index import ExportIndex, index_path
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config')
@@ -576,7 +577,7 @@ def partition_patients_by_progress(patients, base_downloads_path):
 
 async def run_worker_pool(
     patients, worker_count, credentials, settings, base_downloads_path,
-    per_page, log, list_total, position_base, phase_label,
+    per_page, log, list_total, position_base, phase_label, export_index=None,
 ):
     """Shard patients and run workers; returns merged outcome counts/rows."""
     empty = {
@@ -615,6 +616,7 @@ async def run_worker_pool(
             log,
             list_total,
             position_offsets[i],
+            export_index,
         )
         for i, shard in enumerate(shards)
     ], return_exceptions=True)
@@ -655,9 +657,14 @@ def _failed_report_row(patient_id, full_name):
     }
 
 
+async def _update_export_index(export_index, patient, base_downloads_path):
+    if export_index is not None:
+        await export_index.update_patient(patient, base_downloads_path, to_pascalcase)
+
+
 async def process_one_patient(
     page, patient, base_downloads_path, per_page, log,
-    list_position, list_total, worker_id,
+    list_position, list_total, worker_id, export_index=None,
 ):
     """
     Export all document types for one patient.
@@ -695,6 +702,7 @@ async def process_one_patient(
         )
         if not has_new_records:
             log.patient_skipped(patient_id, first_name, last_name, worker_id=worker_id)
+            await _update_export_index(export_index, patient, base_downloads_path)
             return None, 0, True
         log.warning(f"[W{worker_id}] Patient has new records - re-downloading")
     elif os.path.exists(patient_folder_path):
@@ -926,6 +934,7 @@ async def process_one_patient(
             'sms_log': sms_count,
             'total_files': total_files,
         }
+        await _update_export_index(export_index, patient, base_downloads_path)
         return report_row, total_files, False
 
     except Exception as e:
@@ -933,12 +942,13 @@ async def process_one_patient(
             f"[W{worker_id}] Failed to process patient {patient_id} "
             f"({first_name} {last_name}): {e}"
         )
+        await _update_export_index(export_index, patient, base_downloads_path)
         return _failed_report_row(patient_id, full_name), 0, False
 
 
 async def worker(
     worker_id, patients, credentials, settings, base_downloads_path,
-    per_page, log, list_total, position_offset,
+    per_page, log, list_total, position_offset, export_index=None,
 ):
     """
     One browser session processing a contiguous patient shard.
@@ -971,7 +981,7 @@ async def worker(
             list_position = position_offset + i + 1
             row, files_added, was_skipped = await process_one_patient(
                 page, patient, base_downloads_path, per_page, log,
-                list_position, list_total, worker_id,
+                list_position, list_total, worker_id, export_index,
             )
             if was_skipped:
                 skipped += 1
@@ -1093,6 +1103,14 @@ async def main():
     log.info(f"Patients to process: {len(patient_data)}")
     log.info(f"Workers: {worker_count} | per_page: {per_page}")
 
+    export_index = ExportIndex(index_path(base_downloads_path))
+    index_summary = export_index.initialize(patient_data, base_downloads_path, to_pascalcase)
+    log.info(
+        f"Export index CSV: {export_index.path} "
+        f"({index_summary['complete']} complete, {index_summary['partial']} partial, "
+        f"{index_summary['pending']} pending, {index_summary['failed']} failed)"
+    )
+
     start_from_patient_id = str(settings.get('start_from_patient_id') or '').strip()
     if start_from_patient_id:
         match_indexes = [
@@ -1147,6 +1165,7 @@ async def main():
         len(patient_data),
         start_index,
         "PHASE 1 — FINISH INCOMPLETE PATIENTS (all 10 folders) BEFORE NEW EXPORTS",
+        export_index,
     )
     processed_count += phase1['processed']
     skipped_count += phase1['skipped']
@@ -1165,6 +1184,7 @@ async def main():
         len(patient_data),
         start_index + len(incomplete),
         "PHASE 2 — NEW PATIENTS (incomplete phase finished)",
+        export_index,
     )
     processed_count += phase2['processed']
     skipped_count += phase2['skipped']
