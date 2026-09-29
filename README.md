@@ -46,6 +46,8 @@ downloads/
 
 The progress HTML report is written under **Delivery Report**.
 
+Empty category folders (no exported files) are removed automatically after each patient and at export start.
+
 ### Example patient folder
 
 ```text
@@ -96,7 +98,7 @@ Same-name / same-date PDFs are **not skipped** — sequence numbers are appended
 - **Service history:** blank cells → `N/A`; empty list → one row with `no data found for this patient`
 - **Available credits:** always written (including `$0` rows); referral lines listed individually plus a total row
 - **SMS log:** `From` is `Facility` or the patient name; empty conversation → `no data found for this patient`
-- **Appointments:** empty appointment list → folder is left without an export file
+- **Appointments:** empty appointment list → no category folder is kept on disk
 
 ## Requirements
 

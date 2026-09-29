@@ -30,6 +30,8 @@ from export_status import (
     is_category_done,
     is_patient_export_complete,
     mark_category,
+    remove_empty_category_folders,
+    cleanup_empty_folders_in_base,
 )
 from progress_report import generate_progress_report
 from export_index import ExportIndex
@@ -677,6 +679,7 @@ async def process_one_patient(
         )
         if not has_new_records:
             log.patient_skipped(patient_id, first_name, last_name, worker_id=worker_id)
+            remove_empty_category_folders(patient_folder_path)
             await _update_export_index(export_index, patient, base_downloads_path)
             return 0, True
         log.warning(f"[W{worker_id}] Patient has new records - re-downloading")
@@ -691,9 +694,6 @@ async def process_one_patient(
     credits_count = sms_count = 0
 
     try:
-        for subfolder in PATIENT_SUBFOLDERS:
-            os.makedirs(os.path.join(patient_folder_path, subfolder), exist_ok=True)
-
         # 1) Patient details
         if is_category_done(patient_folder_path, CATEGORY_DETAILS):
             details_count = count_files_in_folder(
@@ -887,6 +887,12 @@ async def process_one_patient(
 
         log.patient_complete(patient_id, first_name, last_name, worker_id=worker_id)
 
+        removed_empty = remove_empty_category_folders(patient_folder_path)
+        if removed_empty:
+            log.info(
+                f"  [W{worker_id}] Removed {removed_empty} empty category folder(s)"
+            )
+
         total_files = (
             details_count + encounter_count + consent_count + invoice_count
             + images_count + membership_count + appointment_count
@@ -1056,6 +1062,12 @@ async def main():
     log.info(f"Facility: {facility_name}")
     log.info(f"Facility folder: {os.path.join(DOWNLOADS_ROOT, facility_folder)}")
     log.info(f"Patient records: {base_downloads_path}")
+    cleaned_patients, removed_folders = cleanup_empty_folders_in_base(base_downloads_path)
+    if removed_folders:
+        log.info(
+            f"Removed {removed_folders} empty category folder(s) "
+            f"across {cleaned_patients} existing patient(s)"
+        )
     log.info(f"Patients to process: {len(patient_data)}")
     log.info(f"Workers: {worker_count} | per_page: {per_page}")
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -181,6 +182,44 @@ def folder_file_summary(folder_path: str) -> Tuple[int, str]:
     # Prefer a single dominant type label
     parts = [f"{n} {k}" for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
     return total, ", ".join(parts)
+
+
+def remove_empty_category_folders(patient_folder: str) -> int:
+    """Delete category subfolders with no exported content files."""
+    if not os.path.isdir(patient_folder):
+        return 0
+    removed = 0
+    for cat in ALL_CATEGORIES:
+        sub = os.path.join(patient_folder, cat)
+        if not os.path.isdir(sub):
+            continue
+        count, _ = folder_file_summary(sub)
+        if count == 0:
+            shutil.rmtree(sub)
+            removed += 1
+    return removed
+
+
+def cleanup_empty_folders_in_base(base_downloads_path: str) -> Tuple[int, int]:
+    """
+    Remove empty category subfolders under every patient folder in base.
+    Returns (patients_touched, folders_removed).
+    """
+    if not os.path.isdir(base_downloads_path):
+        return 0, 0
+    patients_touched = 0
+    folders_removed = 0
+    for name in os.listdir(base_downloads_path):
+        path = os.path.join(base_downloads_path, name)
+        if not os.path.isdir(path):
+            continue
+        if name == "export_index.csv" or not name.split("_", 1)[0].isdigit():
+            continue
+        n = remove_empty_category_folders(path)
+        if n:
+            patients_touched += 1
+            folders_removed += n
+    return patients_touched, folders_removed
 
 
 def mark_category(
