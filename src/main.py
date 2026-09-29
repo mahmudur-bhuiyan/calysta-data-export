@@ -1191,14 +1191,11 @@ async def main():
 
     log.summary(len(patient_data), processed_count, skipped_count, total_files_downloaded)
 
-    log.info("Generating facility progress report (all patients in CSV)...")
-    facility_safe = sanitize_facility_folder_name(facility_name).replace(' ', '_')
-    facility_safe = facility_safe.replace('(', '').replace(')', '')
+    log.info("Generating facility delivery report (all patients in CSV)...")
     delivery_dir = delivery_report_dir(facility_folder)
     os.makedirs(delivery_dir, exist_ok=True)
-    from datetime import datetime
-    report_date = datetime.now().strftime('%m-%d-%Y')
-    progress_filename = f"{facility_safe}_Export_Progress_{report_date}.html"
+    from progress_report import delivery_report_filename
+    progress_filename = delivery_report_filename(facility_name)
     progress_path = generate_progress_report(
         facility_name=facility_name,
         patient_data=patient_data,

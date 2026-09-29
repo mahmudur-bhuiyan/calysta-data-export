@@ -41,7 +41,7 @@ downloads/
     │       ├── 02_Patient_Images/
     │       … (10 category folders per patient)
     └── <Facility Name> - Delivery Report/
-        └── …_Export_Progress_MM-DD-YYYY.html
+        └── …_Delivery_Report_MM-DD-YYYY.html
 ```
 
 The progress HTML report is written under **Delivery Report**.

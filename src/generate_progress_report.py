@@ -2,16 +2,14 @@
 
 import os
 from main import (
-    PROJECT_ROOT,
     CONFIG_PATH,
-    DOWNLOADS_ROOT,
     load_yaml,
     load_patient_data,
     select_patient_csv,
     sanitize_facility_folder_name,
     to_pascalcase,
 )
-from progress_report import generate_progress_report
+from progress_report import delivery_report_filename, generate_progress_report
 from download_ledger import remove_all_download_ledgers
 from export_status import remove_all_export_status_files
 from facility_paths import (
@@ -19,8 +17,6 @@ from facility_paths import (
     ensure_facility_layout,
     resolve_patients_base,
 )
-from datetime import datetime
-
 def main():
     credentials = load_yaml(os.path.join(CONFIG_PATH, "credentials.yaml"))
     facility_name = credentials.get("facility", "Facility")
@@ -36,8 +32,7 @@ def main():
     output_dir = delivery_report_dir(facility_folder)
     os.makedirs(output_dir, exist_ok=True)
 
-    safe = facility_folder.replace(" ", "_").replace("(", "").replace(")", "")
-    filename = f"{safe}_Export_Progress_{datetime.now().strftime('%m-%d-%Y')}.html"
+    filename = delivery_report_filename(facility_name)
     path = generate_progress_report(
         facility_name=facility_name,
         patient_data=patient_data,
