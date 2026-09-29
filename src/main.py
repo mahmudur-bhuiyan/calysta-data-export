@@ -7,7 +7,7 @@ from auth import authenticate_and_select_facility
 from encounter_downloader import download_encounter_documents
 from consent_downloader import download_consent_documents
 from invoice_downloader import download_invoice_documents
-from image_downloader import download_patient_images
+from image_downloader import download_patient_images, migrate_patient_image_folder
 from membership_invoice_downloader import download_membership_invoices
 from appointment_downloader import download_appointment_history
 from credits_downloader import download_all_credits
@@ -15,7 +15,7 @@ from service_history_downloader import download_service_history
 from sms_log_downloader import download_sms_log
 from patient_details_downloader import download_patient_details
 from logger import init_logger, get_logger
-from download_ledger import count_content_files, LEDGER_FILENAME
+from download_ledger import count_content_files, LEDGER_FILENAME, remove_all_download_ledgers
 from export_status import (
     CATEGORY_DETAILS,
     CATEGORY_IMAGES,
@@ -30,6 +30,7 @@ from export_status import (
     is_category_done,
     is_patient_export_complete,
     mark_category,
+    remove_all_export_status_files,
     remove_empty_category_folders,
     cleanup_empty_folders_in_base,
 )
@@ -725,7 +726,7 @@ async def process_one_patient(
                 page, images_download_path,
                 patient_id=patient_id, per_page=per_page, patient_name=full_name,
             )
-            rename_files_in_folder(images_download_path, full_name, 'Image')
+            migrate_patient_image_folder(images_download_path)
             images_count = count_files_in_folder(images_download_path)
             log.patient_download_complete('Image', images_count, full_name)
             mark_category(
@@ -1175,6 +1176,14 @@ async def main():
         custom_filename=progress_filename,
     )
     log.success(f"Progress report generated: {progress_path}")
+
+    ledger_removed = remove_all_download_ledgers(base_downloads_path)
+    if ledger_removed:
+        log.info(f"Removed {ledger_removed} download ledger file(s)")
+
+    status_removed = remove_all_export_status_files(base_downloads_path)
+    if status_removed:
+        log.info(f"Removed {status_removed} export status file(s)")
 
 if __name__ == "__main__":
     asyncio.run(main())

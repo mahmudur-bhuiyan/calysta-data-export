@@ -12,6 +12,8 @@ from main import (
     to_pascalcase,
 )
 from progress_report import generate_progress_report
+from download_ledger import remove_all_download_ledgers
+from export_status import remove_all_export_status_files
 from facility_paths import (
     delivery_report_dir,
     ensure_facility_layout,
@@ -44,7 +46,13 @@ def main():
         to_pascalcase=to_pascalcase,
         custom_filename=filename,
     )
+    ledger_removed = remove_all_download_ledgers(base_downloads_path)
+    status_removed = remove_all_export_status_files(base_downloads_path)
     print(f"Progress report: {path}")
+    if ledger_removed:
+        print(f"Removed {ledger_removed} download ledger file(s)")
+    if status_removed:
+        print(f"Removed {status_removed} export status file(s)")
 
 
 if __name__ == "__main__":

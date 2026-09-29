@@ -92,3 +92,19 @@ def count_content_files(folder_path: str) -> int:
         if os.path.isfile(full):
             count += 1
     return count
+
+
+def remove_all_download_ledgers(base_downloads_path: str) -> int:
+    """Remove .download_ledger.json resume files after export/report completes."""
+    if not os.path.isdir(base_downloads_path):
+        return 0
+    removed = 0
+    for root, _dirs, files in os.walk(base_downloads_path):
+        if LEDGER_FILENAME not in files:
+            continue
+        try:
+            os.remove(os.path.join(root, LEDGER_FILENAME))
+            removed += 1
+        except OSError:
+            pass
+    return removed

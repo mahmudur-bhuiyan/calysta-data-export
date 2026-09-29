@@ -56,7 +56,7 @@ downloads/Reborn Health & Aesthetics/Reborn Health & Aesthetics - Patients Recor
     ├── 01_Patient_Details/
     │   └── Zensen Shen_details.csv
     ├── 02_Patient_Images/
-    │   └── patient image …_Zensen Shen_MM-DD-YYYY.png
+    │   └── {imageId}_Zensen Shen_09-29-2026_16_04_26.png
     ├── 03_Appointment_History/
     │   └── Appointment_History_Zensen Shen.csv
     ├── 04_Service_History/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -11,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from download_ledger import LEDGER_FILENAME, count_content_files
 
 STATUS_FILENAME = ".export_status.json"
+INDEX_FILENAME = "export_index.csv"
 
 # Must match main.PATIENT_SUBFOLDERS order/names
 CATEGORY_DETAILS = "01_Patient_Details"
@@ -37,6 +39,20 @@ ALL_CATEGORIES = [
     CATEGORY_SMS,
 ]
 
+# Must match export_index.CATEGORY_CSV_COLUMNS
+INDEX_CATEGORY_COLUMNS = {
+    CATEGORY_DETAILS: "01_details",
+    CATEGORY_IMAGES: "02_images",
+    CATEGORY_APPOINTMENTS: "03_appointments",
+    CATEGORY_SERVICES: "04_services",
+    CATEGORY_ENCOUNTERS: "05_encounters",
+    CATEGORY_CONSENTS: "06_consents",
+    CATEGORY_INVOICES: "07_invoices",
+    CATEGORY_MEMBERSHIP: "08_membership",
+    CATEGORY_CREDITS: "09_credits",
+    CATEGORY_SMS: "10_sms",
+}
+
 # Short labels for HTML table headers
 CATEGORY_SHORT = {
     CATEGORY_DETAILS: "Details",
@@ -58,13 +74,88 @@ STATUS_FAILED = "failed"
 
 DONE_STATES = {STATUS_DONE, STATUS_DONE_EMPTY}
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
-PDF_EXTS = {".pdf"}
-CSV_EXTS = {".csv"}
-
-
 def status_path(patient_folder: str) -> str:
     return os.path.join(patient_folder, STATUS_FILENAME)
+
+
+def _patient_id_from_folder(patient_folder: str) -> str:
+    return os.path.basename(patient_folder).split("_", 1)[0]
+
+
+def _read_export_index_row(patient_folder: str) -> Optional[Dict[str, str]]:
+    index_path = os.path.join(os.path.dirname(patient_folder), INDEX_FILENAME)
+    if not os.path.isfile(index_path):
+        return None
+    patient_id = _patient_id_from_folder(patient_folder)
+    try:
+        with open(index_path, "r", encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                if (row.get("patient_id") or "").strip() == patient_id:
+                    return {k: (row.get(k) or "") for k in row}
+    except Exception:
+        return None
+    return None
+
+
+def _index_row_is_complete(index_row: Optional[Dict[str, str]]) -> bool:
+    return (index_row or {}).get("overall_status", "").strip().lower() == "complete"
+
+
+def _progress_row_from_export_index(
+    patient_id: str,
+    full_name: str,
+    index_row: Dict[str, str],
+) -> Dict[str, Any]:
+    cells: Dict[str, Dict[str, Any]] = {}
+    done_count = 0
+    total_files = 0
+    for cat in ALL_CATEGORIES:
+        col = INDEX_CATEGORY_COLUMNS[cat]
+        label = (index_row.get(col) or "pending").strip() or "pending"
+        lower = label.lower()
+        if lower in ("pending", "failed"):
+            state = STATUS_FAILED if lower == "failed" else STATUS_PENDING
+        elif label == "empty ok":
+            state = STATUS_DONE_EMPTY
+            done_count += 1
+        else:
+            state = STATUS_DONE
+            done_count += 1
+            total_files += max(1, label.count(";") + 1)
+        cells[cat] = {"state": state, "label": label, "files": 0}
+
+    overall = (index_row.get("overall_status") or "Partial").strip() or "Partial"
+    if done_count == len(ALL_CATEGORIES):
+        overall = "Complete"
+
+    return {
+        "patient_id": patient_id,
+        "patient_name": full_name,
+        "status": overall,
+        "done_categories": done_count,
+        "total_categories": len(ALL_CATEGORIES),
+        "categories": cells,
+    }
+
+
+def remove_all_export_status_files(base_downloads_path: str) -> int:
+    """Remove .export_status.json resume files after export/report completes."""
+    if not os.path.isdir(base_downloads_path):
+        return 0
+    removed = 0
+    for name in os.listdir(base_downloads_path):
+        path = os.path.join(base_downloads_path, name)
+        if not os.path.isdir(path):
+            continue
+        status_file = status_path(path)
+        if not os.path.isfile(status_file):
+            continue
+        try:
+            os.remove(status_file)
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def _empty_categories() -> Dict[str, Any]:
@@ -127,7 +218,11 @@ def save_export_status(patient_folder: str, status: Dict[str, Any]) -> None:
 def is_category_done(patient_folder: str, category: str) -> bool:
     status = load_export_status(patient_folder)
     state = (status["categories"].get(category) or {}).get("state")
-    return state in DONE_STATES
+    if state in DONE_STATES:
+        return True
+    if not os.path.isfile(status_path(patient_folder)):
+        return _index_row_is_complete(_read_export_index_row(patient_folder))
+    return False
 
 
 def is_patient_export_complete(patient_folder: str) -> bool:
@@ -137,22 +232,21 @@ def is_patient_export_complete(patient_folder: str) -> bool:
     status = load_export_status(patient_folder)
     if status.get("complete"):
         return True
-    # Legacy / repaired: if status file missing but we can prove all 10 from disk
-    # do not auto-skip legacy incomplete 5-folder patients.
+    if not os.path.isfile(status_path(patient_folder)):
+        return _index_row_is_complete(_read_export_index_row(patient_folder))
     return False
 
 
 def folder_file_summary(folder_path: str) -> Tuple[int, str]:
     """
-    Count content files and build a short label like '5 pdf', '10 jpg', '1 csv'.
+    Count content files and build a label listing each filename (semicolon-separated).
     Returns (count, label_without_empty_ok).
     """
     if not os.path.isdir(folder_path):
         return 0, "pending"
 
-    counts: Dict[str, int] = {}
-    total = 0
-    for name in os.listdir(folder_path):
+    names: List[str] = []
+    for name in sorted(os.listdir(folder_path)):
         if name.startswith(".") or name.endswith(".tmp") or name == LEDGER_FILENAME:
             continue
         if name == STATUS_FILENAME:
@@ -160,28 +254,12 @@ def folder_file_summary(folder_path: str) -> Tuple[int, str]:
         full = os.path.join(folder_path, name)
         if not os.path.isfile(full):
             continue
-        total += 1
-        ext = os.path.splitext(name)[1].lower()
-        if ext in PDF_EXTS:
-            key = "pdf"
-        elif ext in IMAGE_EXTS:
-            key = ext.lstrip(".") or "img"
-            if key == "jpeg":
-                key = "jpg"
-        elif ext in CSV_EXTS:
-            key = "csv"
-        elif ext:
-            key = ext.lstrip(".")
-        else:
-            key = "file"
-        counts[key] = counts.get(key, 0) + 1
+        names.append(name)
 
-    if total == 0:
+    if not names:
         return 0, "pending"
 
-    # Prefer a single dominant type label
-    parts = [f"{n} {k}" for k, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
-    return total, ", ".join(parts)
+    return len(names), "; ".join(names)
 
 
 def remove_empty_category_folders(patient_folder: str) -> int:
@@ -280,6 +358,11 @@ def patient_progress_row(
     Infers labels from disk when status is pending but files exist.
     """
     exists = os.path.isdir(patient_folder)
+    if exists and not os.path.isfile(status_path(patient_folder)):
+        index_row = _read_export_index_row(patient_folder)
+        if _index_row_is_complete(index_row):
+            return _progress_row_from_export_index(patient_id, full_name, index_row)
+
     status = load_export_status(patient_folder) if exists else {
         "categories": _empty_categories(),
         "complete": False,
@@ -298,7 +381,7 @@ def patient_progress_row(
             done_count += 1
             if state == STATUS_DONE_EMPTY:
                 label = "empty ok"
-            elif label in ("done", "pending", "") and sub:
+            elif sub:
                 _, label = folder_file_summary(sub)
         elif exists and sub and os.path.isdir(sub):
             count, disk_label = folder_file_summary(sub)
