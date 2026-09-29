@@ -4,7 +4,11 @@ import os
 import csv
 import asyncio
 import yaml
-from patient_details_selectors import PATIENT_DETAILS_URL, PATIENT_DETAIL_FIELDS
+from patient_details_selectors import (
+    PATIENT_DETAILS_URL,
+    PATIENT_DETAIL_FIELDS,
+    PATIENT_DETAIL_CSV_COLUMNS,
+)
 from page_wait import goto_ready
 
 
@@ -112,13 +116,14 @@ async def download_patient_details(page, download_dir, patient_id, patient_name)
                     scraped["Referral Code"] = join_url
 
             row = {field: cell_or_na(scraped.get(field)) for field in PATIENT_DETAIL_FIELDS}
+            row["patient_id"] = str(patient_id).strip()
 
             os.makedirs(download_dir, exist_ok=True)
             filename = f"{patient_name}_details.csv"
             save_path = os.path.join(download_dir, filename)
 
-            with open(save_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=PATIENT_DETAIL_FIELDS)
+            with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=PATIENT_DETAIL_CSV_COLUMNS)
                 writer.writeheader()
                 writer.writerow(row)
 

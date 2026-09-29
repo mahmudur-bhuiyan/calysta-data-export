@@ -8,7 +8,13 @@ import tempfile
 import yaml
 from html.parser import HTMLParser
 from html import unescape
-from appointment_selectors import EXPORT_BUTTON, EMPTY_TABLE_CELL, DATATABLES_INFO
+from appointment_selectors import (
+    APPOINTMENT_CSV_COLUMNS,
+    APPOINTMENT_PORTAL_HEADERS,
+    DATATABLES_INFO,
+    EMPTY_TABLE_CELL,
+    EXPORT_BUTTON,
+)
 from page_wait import goto_ready
 
 
@@ -103,40 +109,30 @@ def html_export_to_csv_rows(html_content):
     return headers, rows
 
 
-def write_appointment_csv(save_path, headers, rows):
+def write_appointment_csv(save_path, headers, rows, patient_id=None):
     """Write a real CSV file Excel can open without format warnings."""
     if not headers:
-        headers = [
-            "Patient",
-            "Patient Email Address",
-            "Cell Phone",
-            "Home Phone",
-            "Provider",
-            "Resource",
-            "Booked By",
-            "Services",
-            "Appointment note",
-            "Appointment date",
-            "Appointment time",
-            "Booking Date",
-            "Booking Time",
-            "Appointment status",
-        ]
+        headers = list(APPOINTMENT_PORTAL_HEADERS) + ["Cell Phone", "Home Phone"]
 
     # Drop phone columns from the exported CSV
-    drop_headers = {"cell phone", "home phone"}
+    drop_headers = {"cell phone", "home phone", "patient_id"}
     keep_indexes = [
         i for i, h in enumerate(headers)
         if (h or "").strip().lower() not in drop_headers
     ]
     filtered_headers = [headers[i] for i in keep_indexes]
+    if patient_id is not None:
+        filtered_headers = ["patient_id"] + filtered_headers
 
     with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(filtered_headers)
         for row in rows:
             padded = list(row[: len(headers)]) + [""] * max(0, len(headers) - len(row))
-            writer.writerow([padded[i] for i in keep_indexes])
+            data = [padded[i] for i in keep_indexes]
+            if patient_id is not None:
+                data = [str(patient_id).strip()] + data
+            writer.writerow(data)
 
 
 async def _is_appointment_list_empty(page):
@@ -203,7 +199,7 @@ async def download_appointment_history(page, download_dir, patient_id, patient_n
 
         save_filename = f"Appointment_History_{patient_name}.csv"
         save_path = os.path.join(download_dir, save_filename)
-        write_appointment_csv(save_path, headers, rows)
+        write_appointment_csv(save_path, headers, rows, patient_id=patient_id)
 
         # Remove leftover mismatched .xls from earlier runs if present
         legacy_xls = os.path.join(download_dir, f"Appointment_History_{patient_name}.xls")

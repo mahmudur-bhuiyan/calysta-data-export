@@ -254,6 +254,13 @@ def folder_file_summary(folder_path: str) -> Tuple[int, str]:
         full = os.path.join(folder_path, name)
         if not os.path.isfile(full):
             continue
+        if name.lower().endswith(".csv"):
+            try:
+                from service_history_downloader import is_placeholder_service_csv
+                if is_placeholder_service_csv(full):
+                    continue
+            except ImportError:
+                pass
         names.append(name)
 
     if not names:
@@ -348,6 +355,46 @@ def mark_category(
     save_export_status(patient_folder, status)
 
 
+def _progress_row_from_disk(
+    patient_id: str,
+    full_name: str,
+    patient_folder: str,
+) -> Dict[str, Any]:
+    """Infer export progress from on-disk folders (missing folder = empty ok)."""
+    cells: Dict[str, Dict[str, Any]] = {}
+    done_count = 0
+    for cat in ALL_CATEGORIES:
+        sub = os.path.join(patient_folder, cat)
+        if os.path.isdir(sub):
+            count, label = folder_file_summary(sub)
+            if count > 0:
+                cells[cat] = {"state": STATUS_DONE, "label": label, "files": count}
+            else:
+                cells[cat] = {"state": STATUS_DONE_EMPTY, "label": "empty ok", "files": 0}
+            done_count += 1
+        else:
+            cells[cat] = {"state": STATUS_DONE_EMPTY, "label": "empty ok", "files": 0}
+            done_count += 1
+
+    if done_count == len(ALL_CATEGORIES):
+        overall = "Complete"
+    elif done_count == 0:
+        overall = "Pending"
+    elif any(cells[c]["state"] == STATUS_PENDING for c in ALL_CATEGORIES):
+        overall = "Partial"
+    else:
+        overall = "Partial"
+
+    return {
+        "patient_id": patient_id,
+        "patient_name": full_name,
+        "status": overall,
+        "done_categories": done_count,
+        "total_categories": len(ALL_CATEGORIES),
+        "categories": cells,
+    }
+
+
 def patient_progress_row(
     patient_id: str,
     full_name: str,
@@ -359,9 +406,7 @@ def patient_progress_row(
     """
     exists = os.path.isdir(patient_folder)
     if exists and not os.path.isfile(status_path(patient_folder)):
-        index_row = _read_export_index_row(patient_folder)
-        if _index_row_is_complete(index_row):
-            return _progress_row_from_export_index(patient_id, full_name, index_row)
+        return _progress_row_from_disk(patient_id, full_name, patient_folder)
 
     status = load_export_status(patient_folder) if exists else {
         "categories": _empty_categories(),

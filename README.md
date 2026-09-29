@@ -8,16 +8,16 @@ For each patient in the input CSV (`id`, `first_name`, `last_name`), the exporte
 
 | # | Data category | What is saved |
 |---|---|---|
-| 01 | Patient details | Profile fields (name, DOB, gender, contact, address, referral, pharmacy, notification settings, and related attributes) as a single-row CSV |
+| 01 | Patient details | Profile fields (`patient_id`, name, DOB, gender, contact, address, referral, pharmacy, notification settings, and related attributes) as a single-row CSV |
 | 02 | Patient images | Clinical / patient images |
-| 03 | Appointment history | Full appointment export converted to CSV (phone columns excluded) |
+| 03 | Appointment history | Full appointment export converted to CSV (`patient_id` plus portal columns; phone columns excluded) |
 | 04 | Service history | Service list rows: Service Name, Package Name, Date Received, Appointment Date, Created on |
 | 05 | Encounter history | Encounter PDFs |
 | 06 | Consent form history | Consent form PDFs |
 | 07 | Patient invoices | Invoice PDFs |
 | 08 | Membership invoices | Membership invoice PDFs |
 | 09 | Available credits | Booking, banked, e-gift, and referral credit balances in one CSV |
-| 10 | SMS log history | Conversation log as CSV (`From`, `Message`, `Date`; emojis stripped) |
+| 10 | SMS log history | SMS/email notification log as CSV (`patient_id`, `patient_name`, `type`, `message`, `category`, `sent_on`) from Master Data |
 
 Also generated after each run:
 

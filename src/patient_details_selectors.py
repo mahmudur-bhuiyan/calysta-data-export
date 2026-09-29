@@ -27,3 +27,6 @@ PATIENT_DETAIL_FIELDS = [
     "Alternative Pharmacy",
     "Alternative Pharmacy Address",
 ]
+
+# Written to CSV (patient_id is supplied by the exporter, not scraped from the page)
+PATIENT_DETAIL_CSV_COLUMNS = ["patient_id"] + PATIENT_DETAIL_FIELDS

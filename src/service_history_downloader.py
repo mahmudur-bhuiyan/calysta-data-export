@@ -24,6 +24,8 @@ BLANK_PLACEHOLDERS = {
     "add received date",
 }
 
+SERVICE_PLACEHOLDER_NAME = "no data found for this patient"
+
 
 def load_settings():
     config_path = os.path.join(os.path.dirname(__file__), "..", "config", "settings.yaml")
@@ -38,6 +40,48 @@ def cell_or_na(value):
     if text.lower() in BLANK_PLACEHOLDERS:
         return "N/A"
     return text if text else "N/A"
+
+
+def is_placeholder_service_csv(path: str) -> bool:
+    """True when the CSV is the legacy single-row 'no data found' placeholder."""
+    if not os.path.isfile(path) or not path.lower().endswith(".csv"):
+        return False
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return False
+    return (
+        len(rows) == 1
+        and (rows[0].get("Service Name") or "").strip().lower() == SERVICE_PLACEHOLDER_NAME
+    )
+
+
+async def _wait_for_service_table(page, timeout=30000):
+    """Wait until the service table shows rows or a confirmed empty state."""
+    try:
+        await page.wait_for_function(
+            """() => {
+              for (const table of document.querySelectorAll('table')) {
+                const ths = Array.from(table.querySelectorAll('thead th')).map(th =>
+                  th.innerText.trim().toLowerCase()
+                );
+                if (!ths.includes('service name')) continue;
+
+                const emptyCell = table.querySelector('td.dataTables_empty, .dataTables_empty');
+                const bodyRows = Array.from(table.querySelectorAll('tbody tr')).filter(tr => {
+                  if (tr.querySelector('.dataTables_empty, td.dataTables_empty')) return false;
+                  return tr.querySelectorAll('td').length > 0;
+                });
+                if (bodyRows.length > 0) return true;
+                if (emptyCell && emptyCell.innerText.trim()) return true;
+              }
+              return false;
+            }""",
+            timeout=timeout,
+        )
+    except Exception:
+        pass
 
 
 async def _extract_service_rows_current_page(page):
@@ -159,10 +203,9 @@ async def download_service_history(page, download_dir, patient_id, patient_name)
     Scrape patient service history into Service_History_{PatientName}.csv.
 
     Columns: Service Name, Package Name, Date Received, Appointment Date, Created on
-    Blank cells become N/A. Empty list writes one row with
-    "no data found for this patient" under Service Name.
+    Blank cells become N/A. Empty list returns 0 (caller marks category empty ok).
 
-    Returns 1 on success, 0 on failure.
+    Returns row count on success, 0 when empty or on failure.
     """
     settings = load_settings()
     page_timeout = settings.get("page_timeout", 60000)
@@ -172,20 +215,17 @@ async def download_service_history(page, download_dir, patient_id, patient_name)
     try:
         await goto_ready(
             page, url,
-            f"table, {DATATABLES_EMPTY}",
+            "table thead th",
             timeout=page_timeout,
+            ready_timeout=min(int(page_timeout), 30000),
         )
+        await _wait_for_service_table(page)
 
         rows = await _collect_all_service_rows(page)
 
         if not rows:
-            rows = [{
-                "Service Name": "no data found for this patient",
-                "Package Name": "N/A",
-                "Date Received": "N/A",
-                "Appointment Date": "N/A",
-                "Created on": "N/A",
-            }]
+            print(f"[SERVICE] No service history rows for {patient_id}")
+            return 0
 
         os.makedirs(download_dir, exist_ok=True)
         filename = f"Service_History_{patient_name}.csv"
@@ -197,7 +237,7 @@ async def download_service_history(page, download_dir, patient_id, patient_name)
             writer.writerows(rows)
 
         print(f"[SERVICE] Wrote {filename} ({len(rows)} row(s))")
-        return 1
+        return len(rows)
 
     except Exception as e:
         print(f"[SERVICE] Error collecting service history for {patient_id}: {e}")

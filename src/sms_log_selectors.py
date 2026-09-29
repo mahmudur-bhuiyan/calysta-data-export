@@ -8,4 +8,11 @@ SENDER_CHAT = "sender-chat"      # patient messages
 RECEIVER_CHAT = "receiver-chat"  # facility messages
 MESSAGE_TIME = ".time-right"
 
-SMS_LOG_COLUMNS = ["From", "Message", "Date"]
+SMS_LOG_COLUMNS = [
+    "patient_id",
+    "patient_name",
+    "type",
+    "message",
+    "category",
+    "sent_on",
+]

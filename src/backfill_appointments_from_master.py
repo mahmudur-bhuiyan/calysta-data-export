@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime, date, time
 
 from appointment_downloader import write_appointment_csv
+from appointment_selectors import APPOINTMENT_PORTAL_HEADERS
 from export_status import CATEGORY_APPOINTMENTS, mark_category
 from facility_paths import delivery_report_dir, master_data_dir, resolve_patients_base
 from main import (
@@ -24,22 +25,6 @@ from main import (
 )
 from progress_report import generate_progress_report
 from validate_export import _count_by_patient, _csv_rows, _find_master_csv, _load_patients
-
-
-PORTAL_HEADERS = [
-    "Patient",
-    "Patient Email Address",
-    "Provider",
-    "Resource",
-    "Booked By",
-    "Services",
-    "Appointment note",
-    "Appointment date",
-    "Appointment time",
-    "Booking Date",
-    "Booking Time",
-    "Appointment status",
-]
 
 
 def _format_date(value: str) -> str:
@@ -164,7 +149,9 @@ def backfill(facility_folder: str, patient_ids: list[str] | None = None) -> int:
         os.makedirs(appt_dir, exist_ok=True)
         save_path = os.path.join(appt_dir, f"Appointment_History_{full_name}.csv")
         portal_rows = _to_portal_rows(master_rows, email)
-        write_appointment_csv(save_path, PORTAL_HEADERS, portal_rows)
+        write_appointment_csv(
+            save_path, APPOINTMENT_PORTAL_HEADERS, portal_rows, patient_id=pid
+        )
         mark_category(folder, CATEGORY_APPOINTMENTS, file_count=1)
         filled += 1
         print(f"Backfilled {pid} ({full_name}): {len(portal_rows)} appointment row(s)")
