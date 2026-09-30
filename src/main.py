@@ -12,8 +12,7 @@ from membership_invoice_downloader import download_membership_invoices
 from appointment_downloader import download_appointment_history
 from credits_downloader import download_all_credits
 from service_history_downloader import download_service_history
-from sms_log_downloader import export_sms_log
-from sms_log_master import find_master_sms_csv, load_sms_logs_by_patient
+from sms_log_downloader import download_sms_log
 from patient_details_downloader import download_patient_details
 from logger import init_logger, get_logger
 from download_ledger import count_content_files, LEDGER_FILENAME, remove_all_download_ledgers
@@ -41,7 +40,6 @@ from facility_paths import (
     copy_patient_list_to_master_data,
     delivery_report_dir,
     ensure_facility_layout,
-    master_data_dir,
     resolve_export_index_path,
     resolve_patients_base,
 )
@@ -581,7 +579,6 @@ def partition_patients_by_progress(patients, base_downloads_path):
 async def run_worker_pool(
     patients, worker_count, credentials, settings, base_downloads_path,
     per_page, log, list_total, position_base, phase_label, export_index=None,
-    sms_by_patient=None,
 ):
     """Shard patients and run workers; returns merged outcome counts."""
     empty = {
@@ -620,7 +617,6 @@ async def run_worker_pool(
             list_total,
             position_offsets[i],
             export_index,
-            sms_by_patient,
         )
         for i, shard in enumerate(shards)
     ], return_exceptions=True)
@@ -648,7 +644,6 @@ async def _update_export_index(export_index, patient, base_downloads_path):
 async def process_one_patient(
     page, patient, base_downloads_path, per_page, log,
     list_position, list_total, worker_id, export_index=None,
-    sms_by_patient=None,
 ):
     """
     Export all document types for one patient.
@@ -784,8 +779,6 @@ async def process_one_patient(
                 file_count=service_count,
                 empty_ok=(service_count == 0),
             )
-            if service_count == 0:
-                remove_empty_category_folders(patient_folder_path)
 
         # 5) Encounters
         encounter_path = os.path.join(patient_folder_path, FOLDER_ENCOUNTERS)
@@ -887,12 +880,11 @@ async def process_one_patient(
             log.info(f"  [W{worker_id}] Skipping SMS (already done)")
         else:
             log.patient_download_start('SMS Log', full_name)
-            sms_rows = (sms_by_patient or {}).get(str(patient_id).strip(), [])
-            sms_count = export_sms_log(
+            sms_count = await download_sms_log(
+                page,
                 os.path.join(patient_folder_path, FOLDER_SMS),
                 patient_id=patient_id,
                 patient_name=full_name,
-                sms_by_patient=sms_by_patient or {},
             )
             log.patient_download_complete('SMS Log', sms_count, full_name)
             if sms_count > 0:
@@ -900,10 +892,9 @@ async def process_one_patient(
                     patient_folder_path,
                     CATEGORY_SMS,
                     file_count=sms_count,
-                    empty_ok=(len(sms_rows) == 0),
                 )
             else:
-                mark_category(patient_folder_path, CATEGORY_SMS, failed=True, label="failed")
+                mark_category(patient_folder_path, CATEGORY_SMS, empty_ok=True)
 
         log.patient_complete(patient_id, first_name, last_name, worker_id=worker_id)
 
@@ -933,7 +924,6 @@ async def process_one_patient(
 async def worker(
     worker_id, patients, credentials, settings, base_downloads_path,
     per_page, log, list_total, position_offset, export_index=None,
-    sms_by_patient=None,
 ):
     """
     One browser session processing a contiguous patient shard.
@@ -966,7 +956,6 @@ async def worker(
             files_added, was_skipped = await process_one_patient(
                 page, patient, base_downloads_path, per_page, log,
                 list_position, list_total, worker_id, export_index,
-                sms_by_patient,
             )
             if was_skipped:
                 skipped += 1
@@ -1070,7 +1059,9 @@ async def main():
     facility_folder = sanitize_facility_folder_name(facility_name)
     ensure_facility_layout(facility_folder)
     base_downloads_path = resolve_patients_base(facility_folder)
-    copy_patient_list_to_master_data(facility_folder, csv_path)
+    copied_list = copy_patient_list_to_master_data(facility_folder, csv_path)
+    if copied_list:
+        log.info(f"Copied patient list to Master Data: {os.path.basename(copied_list)}")
 
     worker_count = max(1, int(settings.get('worker_count', 1) or 1))
     # Supervisor can override via EXPORT_WORKER_COUNT (adaptive 5→3→2)
@@ -1092,19 +1083,6 @@ async def main():
         )
     log.info(f"Patients to process: {len(patient_data)}")
     log.info(f"Workers: {worker_count} | per_page: {per_page}")
-
-    master_sms_path = find_master_sms_csv(master_data_dir(facility_folder))
-    sms_by_patient = load_sms_logs_by_patient(master_sms_path)
-    if master_sms_path:
-        log.info(
-            f"SMS/email logs from master: {os.path.basename(master_sms_path)} "
-            f"({sum(len(v) for v in sms_by_patient.values())} rows, "
-            f"{len(sms_by_patient)} patients)"
-        )
-    else:
-        log.warning(
-            "No Master Data SMS/email logs CSV found — per-patient SMS files will be empty."
-        )
 
     export_index = ExportIndex(resolve_export_index_path(facility_folder))
     index_summary = export_index.initialize(patient_data, base_downloads_path, to_pascalcase)
@@ -1168,7 +1146,6 @@ async def main():
         start_index,
         "PHASE 1 — FINISH INCOMPLETE PATIENTS (all 10 folders) BEFORE NEW EXPORTS",
         export_index,
-        sms_by_patient,
     )
     processed_count += phase1['processed']
     skipped_count += phase1['skipped']
@@ -1187,7 +1164,6 @@ async def main():
         start_index + len(incomplete),
         "PHASE 2 — NEW PATIENTS (incomplete phase finished)",
         export_index,
-        sms_by_patient,
     )
     processed_count += phase2['processed']
     skipped_count += phase2['skipped']

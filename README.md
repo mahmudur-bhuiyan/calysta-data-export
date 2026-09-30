@@ -17,7 +17,7 @@ For each patient in the input CSV (`id`, `first_name`, `last_name`), the exporte
 | 07 | Patient invoices | Invoice PDFs |
 | 08 | Membership invoices | Membership invoice PDFs |
 | 09 | Available credits | Booking, banked, e-gift, and referral credit balances in one CSV |
-| 10 | SMS log history | SMS/email notification log as CSV (`patient_id`, `patient_name`, `type`, `message`, `category`, `sent_on`) from Master Data |
+| 10 | SMS log history | SMS conversation log scraped from the portal as CSV (`patient_id`, `patient_name`, `type`, `message`, `category`, `sent_on`) |
 
 Also generated after each run:
 
@@ -32,8 +32,8 @@ Root path:
 downloads/
 ├── logs/
 └── <Facility Name>/
-    ├── <Facility Name> - Master Data/
-    │   └── <patient list CSV copy>
+    ├── <Facility Name> - Master Data/          (optional delivery copy of patient list)
+    │   └── <patient list CSV copy, if enabled>
     ├── <Facility Name> - Patients Records/
     │   ├── export_index.csv
     │   └── {PatientId}_{FirstName}_{LastName}/
@@ -94,11 +94,13 @@ Same-name / same-date PDFs are **not skipped** — sequence numbers are appended
 
 ## Special CSV behaviors
 
-- **Patient details:** one row; missing fields written as `N/A`
-- **Service history:** blank cells → `N/A`; empty list → one row with `no data found for this patient`
+- **Patient details:** one row; missing fields written as `N/A` (folder kept when export succeeds)
+- **Service history:** blank cells → `N/A`; when there are no service rows, no CSV or folder is kept
 - **Available credits:** always written (including `$0` rows); referral lines listed individually plus a total row
-- **SMS log:** `From` is `Facility` or the patient name; empty conversation → `no data found for this patient`
-- **Appointments:** empty appointment list → no category folder is kept on disk
+- **SMS log:** `type` is `Facility` or the patient name; when there are no SMS rows, no CSV or folder is kept
+- **Appointments:** when there are no appointments, no CSV or folder is kept
+- **Images, encounters, consents, invoices, membership invoices:** when nothing is downloaded, the category folder is removed
+- **All categories:** header-only CSVs, zero-byte files, and legacy placeholder exports are deleted automatically after each patient and at export start
 
 ## Requirements
 
@@ -142,7 +144,7 @@ On startup the exporter:
 1. Scans `patient_lists/` for valid patient CSVs only
 2. Selects the file whose **filename matches** the `facility` from `credentials.yaml` (spaces, hyphens, and underscores are ignored when matching)
 3. If no file matches, the run stops with a clear error listing what was found
-4. Writes exports under `downloads/<Facility Name>/` with **Master Data**, **Patients Records**, and **Delivery Report** subfolders
+4. Writes exports under `downloads/<Facility Name>/` with **Patients Records** and **Delivery Report** subfolders (and optionally copies the patient list into **Master Data** for delivery)
 
 Example layout:
 

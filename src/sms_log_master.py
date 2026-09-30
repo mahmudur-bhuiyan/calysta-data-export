@@ -1,45 +1,30 @@
-"""Load facility SMS/email logs from Master Data and write per-patient CSVs."""
+"""Write per-patient SMS log CSVs and prune header-only exports."""
 
 from __future__ import annotations
 
 import csv
 import os
-from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import List
 
 from sms_log_selectors import SMS_LOG_COLUMNS
 
 
-def find_master_sms_csv(master_dir: str) -> Optional[str]:
-    """Return path to *_Sms_Email_Logs_List.csv under Master Data."""
-    if not os.path.isdir(master_dir):
-        return None
-    for name in os.listdir(master_dir):
-        lower = name.lower()
-        if lower.endswith(".csv") and "sms_email_logs" in lower.replace("_", ""):
-            return os.path.join(master_dir, name)
-        if lower.endswith(".csv") and "sms" in lower and "email" in lower and "log" in lower:
-            return os.path.join(master_dir, name)
-    return None
+def sms_log_csv_path(download_dir: str, patient_name: str) -> str:
+    return os.path.join(download_dir, f"SMS_Log_{patient_name}.csv")
 
 
-def load_sms_logs_by_patient(master_path: Optional[str]) -> Dict[str, List[dict]]:
-    """Index master SMS/email log rows by patient_id."""
-    if not master_path or not os.path.isfile(master_path):
-        return {}
+def is_header_only_sms_csv(path: str) -> bool:
+    """True when the SMS CSV exists but has no data rows."""
+    from export_status import is_header_only_csv
 
-    by_patient: Dict[str, List[dict]] = defaultdict(list)
-    with open(master_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            pid = (row.get("patient_id") or "").strip()
-            if not pid:
-                continue
-            by_patient[pid].append({col: (row.get(col) or "").strip() for col in SMS_LOG_COLUMNS})
+    return is_header_only_csv(path)
 
-    for pid in by_patient:
-        by_patient[pid].sort(key=lambda r: r.get("sent_on") or "")
-    return dict(by_patient)
+
+def prune_header_only_sms_files(sms_dir: str) -> int:
+    """Delete empty export files in an SMS category folder."""
+    from export_status import prune_empty_files_in_category
+
+    return prune_empty_files_in_category(sms_dir)
 
 
 def write_patient_sms_log(
@@ -48,18 +33,23 @@ def write_patient_sms_log(
     rows: List[dict],
 ) -> tuple[int, int]:
     """
-    Write SMS_Log_{PatientName}.csv from master log rows.
+    Write SMS_Log_{PatientName}.csv from scraped portal rows.
+
+    When there are no rows, any existing SMS CSV is removed and no file is written.
 
     Returns (files_written, row_count).
     """
-    os.makedirs(download_dir, exist_ok=True)
-    filename = f"SMS_Log_{patient_name}.csv"
-    save_path = os.path.join(download_dir, filename)
+    save_path = sms_log_csv_path(download_dir, patient_name)
 
+    if not rows:
+        if os.path.isfile(save_path):
+            os.remove(save_path)
+        return 0, 0
+
+    os.makedirs(download_dir, exist_ok=True)
     with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=SMS_LOG_COLUMNS)
         writer.writeheader()
-        if rows:
-            writer.writerows(rows)
+        writer.writerows(rows)
 
     return 1, len(rows)

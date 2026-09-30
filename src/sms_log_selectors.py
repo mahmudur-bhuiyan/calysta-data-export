@@ -7,6 +7,7 @@ MESSAGE_BUBBLE = ".entire-chat-bot .single-chat-bot"
 SENDER_CHAT = "sender-chat"      # patient messages
 RECEIVER_CHAT = "receiver-chat"  # facility messages
 MESSAGE_TIME = ".time-right"
+NO_RESULTS_TEXT = "no results found"
 
 SMS_LOG_COLUMNS = [
     "patient_id",

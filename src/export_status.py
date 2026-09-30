@@ -237,6 +237,50 @@ def is_patient_export_complete(patient_folder: str) -> bool:
     return False
 
 
+def is_header_only_csv(path: str) -> bool:
+    """True when a CSV exists but has no data rows."""
+    if not os.path.isfile(path) or not path.lower().endswith(".csv"):
+        return False
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            return len(list(csv.DictReader(f))) == 0
+    except Exception:
+        return False
+
+
+def is_empty_export_file(path: str) -> bool:
+    """True when a file has no real exported content and should be removed."""
+    if not os.path.isfile(path):
+        return False
+    if os.path.getsize(path) == 0:
+        return True
+    if path.lower().endswith(".csv"):
+        try:
+            from service_history_downloader import is_placeholder_service_csv
+
+            if is_placeholder_service_csv(path):
+                return True
+        except ImportError:
+            pass
+        return is_header_only_csv(path)
+    return False
+
+
+def prune_empty_files_in_category(folder_path: str) -> int:
+    """Delete header-only CSVs, zero-byte files, and legacy placeholder exports."""
+    if not os.path.isdir(folder_path):
+        return 0
+    removed = 0
+    for name in list(os.listdir(folder_path)):
+        if name.startswith(".") or name.endswith(".tmp") or name == LEDGER_FILENAME:
+            continue
+        full = os.path.join(folder_path, name)
+        if os.path.isfile(full) and is_empty_export_file(full):
+            os.remove(full)
+            removed += 1
+    return removed
+
+
 def folder_file_summary(folder_path: str) -> Tuple[int, str]:
     """
     Count content files and build a label listing each filename (semicolon-separated).
@@ -244,6 +288,8 @@ def folder_file_summary(folder_path: str) -> Tuple[int, str]:
     """
     if not os.path.isdir(folder_path):
         return 0, "pending"
+
+    prune_empty_files_in_category(folder_path)
 
     names: List[str] = []
     for name in sorted(os.listdir(folder_path)):
@@ -254,13 +300,8 @@ def folder_file_summary(folder_path: str) -> Tuple[int, str]:
         full = os.path.join(folder_path, name)
         if not os.path.isfile(full):
             continue
-        if name.lower().endswith(".csv"):
-            try:
-                from service_history_downloader import is_placeholder_service_csv
-                if is_placeholder_service_csv(full):
-                    continue
-            except ImportError:
-                pass
+        if is_empty_export_file(full):
+            continue
         names.append(name)
 
     if not names:
@@ -278,9 +319,10 @@ def remove_empty_category_folders(patient_folder: str) -> int:
         sub = os.path.join(patient_folder, cat)
         if not os.path.isdir(sub):
             continue
+        prune_empty_files_in_category(sub)
         count, _ = folder_file_summary(sub)
         if count == 0:
-            shutil.rmtree(sub)
+            shutil.rmtree(sub, ignore_errors=True)
             removed += 1
     return removed
 

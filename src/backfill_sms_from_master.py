@@ -1,14 +1,16 @@
-"""Backfill per-patient SMS/email log CSVs from facility Master Data."""
+"""Re-scrape per-patient SMS logs from the Calysta portal."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 from datetime import datetime
 
-from export_status import CATEGORY_SMS, mark_category
-from facility_paths import delivery_report_dir, master_data_dir, resolve_patients_base
+from auth import authenticate_and_select_facility
+from export_status import CATEGORY_SMS, mark_category, remove_empty_category_folders, reset_category
+from facility_paths import delivery_report_dir, resolve_patients_base
 from main import (
     CONFIG_PATH,
     FOLDER_SMS,
@@ -20,63 +22,74 @@ from main import (
     to_pascalcase,
 )
 from progress_report import generate_progress_report
-from sms_log_master import find_master_sms_csv, load_sms_logs_by_patient, write_patient_sms_log
+from sms_log_downloader import download_sms_log
 
 
 def _patient_name(patient: dict) -> str:
     return f"{to_pascalcase(patient['first_name'])} {to_pascalcase(patient['last_name'])}"
 
 
-def backfill(facility_folder: str, patient_ids: list[str] | None = None) -> int:
-    master_dir = master_data_dir(facility_folder)
-    records_dir = resolve_patients_base(facility_folder)
-    master_sms_path = find_master_sms_csv(master_dir)
-    if not master_sms_path:
-        print(f"Error: no SMS/email logs CSV in {master_dir}", file=sys.stderr)
+async def _reexport_sms(patient_ids: list[str] | None, facility_folder: str) -> int:
+    credentials = load_yaml(os.path.join(CONFIG_PATH, "credentials.yaml"))
+    settings = load_yaml(os.path.join(CONFIG_PATH, "settings.yaml"))
+    facility_name = credentials.get("facility", facility_folder)
+
+    csv_path, _ = select_patient_csv(facility_name)
+    if not csv_path:
+        print("Error: no patient list CSV found.", file=sys.stderr)
         return 1
 
-    sms_by_patient = load_sms_logs_by_patient(master_sms_path)
+    patient_data = {p["id"]: p for p in load_patient_data(csv_path)}
+    records_dir = resolve_patients_base(facility_folder)
     folders = index_patient_folders_by_id(records_dir)
-
-    csv_path, _ = select_patient_csv(
-        load_yaml(os.path.join(CONFIG_PATH, "credentials.yaml")).get("facility", "Facility")
-    )
-    patient_data = {p["id"]: p for p in load_patient_data(csv_path)} if csv_path else {}
-
     targets = patient_ids or sorted(folders.keys(), key=int)
-    updated = 0
 
+    rows: list[tuple[dict, str]] = []
     for pid in targets:
-        folder = folders.get(pid)
         patient = patient_data.get(pid)
-        if not folder or not patient:
-            continue
+        folder = folders.get(pid)
+        if patient and folder:
+            rows.append((patient, folder))
 
-        full_name = _patient_name(patient)
-        rows = sms_by_patient.get(pid, [])
-        sms_dir = os.path.join(folder, FOLDER_SMS)
-        os.makedirs(sms_dir, exist_ok=True)
-        write_patient_sms_log(sms_dir, full_name, rows)
-        mark_category(
-            folder,
-            CATEGORY_SMS,
-            file_count=1,
-            empty_ok=(len(rows) == 0),
+    if not rows:
+        print("No patients to process.")
+        return 1
+
+    playwright = browser = None
+    updated = 0
+    try:
+        playwright, browser, context, page = await authenticate_and_select_facility(
+            credentials, settings
         )
-        updated += 1
-        if rows:
-            print(f"Updated {pid} ({full_name}): {len(rows)} row(s)")
-        else:
-            print(f"Updated {pid} ({full_name}): header only (no master rows)")
+        for patient, folder in rows:
+            pid = patient["id"]
+            full_name = _patient_name(patient)
+            sms_dir = os.path.join(folder, FOLDER_SMS)
+            reset_category(folder, CATEGORY_SMS)
+            print(f"\nDownloading SMS log for {pid} ({full_name})...")
+            count = await download_sms_log(
+                page, sms_dir, patient_id=pid, patient_name=full_name
+            )
+            remove_empty_category_folders(folder)
+            if count > 0:
+                mark_category(folder, CATEGORY_SMS, file_count=count)
+                print(f"  OK — wrote SMS log ({count} file)")
+            else:
+                mark_category(folder, CATEGORY_SMS, empty_ok=True)
+                print(f"  No SMS rows for {pid}")
+            updated += 1
+    finally:
+        if browser:
+            await browser.close()
+        if playwright:
+            await playwright.stop()
 
     if csv_path:
         output_dir = delivery_report_dir(facility_folder)
         os.makedirs(output_dir, exist_ok=True)
         safe = facility_folder.replace(" ", "_").replace("(", "").replace(")", "")
         report_path = generate_progress_report(
-            facility_name=load_yaml(os.path.join(CONFIG_PATH, "credentials.yaml")).get(
-                "facility", facility_folder
-            ),
+            facility_name=facility_name,
             patient_data=load_patient_data(csv_path),
             base_downloads_path=records_dir,
             output_dir=output_dir,
@@ -85,18 +98,22 @@ def backfill(facility_folder: str, patient_ids: list[str] | None = None) -> int:
         )
         print(f"Updated progress report: {report_path}")
 
-    print(f"Backfilled SMS logs for {updated}/{len(targets)} patient(s)")
+    print(f"Re-exported SMS logs for {updated}/{len(targets)} patient(s)")
     return 0
+
+
+def backfill(facility_folder: str, patient_ids: list[str] | None = None) -> int:
+    return asyncio.run(_reexport_sms(patient_ids, facility_folder))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Backfill per-patient SMS/email logs from Master Data."
+        description="Re-scrape per-patient SMS logs from the Calysta portal."
     )
     parser.add_argument(
         "patient_ids",
         nargs="*",
-        help="Patient IDs to backfill (default: all exported patients)",
+        help="Patient IDs to re-export (default: all exported patients)",
     )
     parser.add_argument(
         "--facility",
@@ -112,8 +129,7 @@ def main() -> int:
             credentials.get("facility", "Facility")
         )
 
-    patient_ids = args.patient_ids or None
-    return backfill(facility_folder, patient_ids)
+    return backfill(facility_folder, args.patient_ids or None)
 
 
 if __name__ == "__main__":
