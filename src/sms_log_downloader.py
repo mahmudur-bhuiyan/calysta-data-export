@@ -34,10 +34,10 @@ async def _wait_for_sms_page(page, timeout=30000):
         pass
 
 
-async def _extract_sms_rows(page, patient_id, patient_name):
+async def _extract_sms_rows(page, patient_id, patient_display_name):
     """Return SMS rows keyed by SMS_LOG_COLUMNS."""
     data = await page.evaluate(
-        r"""({ patientId, patientName, noResultsText }) => {
+        r"""({ patientId, patientDisplayName, noResultsText }) => {
           const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
           const body = norm(document.body ? document.body.innerText : '');
           if (body.toLowerCase().includes(noResultsText)) {
@@ -59,7 +59,7 @@ async def _extract_sms_rows(page, patient_id, patient_name):
             const category = norm(categoryEl ? categoryEl.innerText : '');
             return {
               patient_id: String(patientId),
-              type: isPatient ? patientName : 'Facility',
+              from: isPatient ? patientDisplayName : 'Facility',
               message,
               category,
               sent_on: sentOn,
@@ -70,7 +70,7 @@ async def _extract_sms_rows(page, patient_id, patient_name):
         }""",
         {
             "patientId": str(patient_id).strip(),
-            "patientName": patient_name,
+            "patientDisplayName": patient_display_name,
             "noResultsText": NO_RESULTS_TEXT,
         },
     )
@@ -81,7 +81,7 @@ async def _extract_sms_rows(page, patient_id, patient_name):
     ]
 
 
-async def download_sms_log(page, download_dir, patient_id, patient_name):
+async def download_sms_log(page, download_dir, patient_id, patient_name, patient_display_name):
     """
     Scrape SMS_Log_{PatientName}.csv from /sms-details/index/{patient_id}.
 
@@ -104,7 +104,7 @@ async def download_sms_log(page, download_dir, patient_id, patient_name):
         )
         await _wait_for_sms_page(page, timeout=min(page_timeout, 30000))
 
-        rows = await _extract_sms_rows(page, patient_id, patient_name)
+        rows = await _extract_sms_rows(page, patient_id, patient_display_name)
         files_written, row_count = write_patient_sms_log(download_dir, patient_name, rows)
         filename = f"SMS_Log_{patient_name}.csv"
         if files_written:

@@ -96,7 +96,7 @@ Same-name / same-date PDFs are **not skipped** — sequence numbers are appended
 - **Patient details:** one row; missing fields written as `N/A` (folder kept when export succeeds)
 - **Service history:** blank cells → `N/A`; when there are no service rows, no CSV or folder is kept
 - **Available credits:** always written (including `$0` rows); referral lines listed individually plus a total row
-- **SMS log:** `type` is `Facility` or the patient name; when there are no SMS rows, no CSV or folder is kept
+- **SMS log:** `from` is `Facility` or the patient display name (e.g. `Susy Perez`); when there are no SMS rows, no CSV or folder is kept
 - **Appointments:** when there are no appointments, no CSV or folder is kept
 - **Images, encounters, consents, invoices, membership invoices:** when nothing is downloaded, the category folder is removed
 - **All categories:** header-only CSVs, zero-byte files, and legacy placeholder exports are deleted automatically after each patient and at export start

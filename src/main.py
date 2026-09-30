@@ -879,6 +879,7 @@ async def process_one_patient(
                 os.path.join(patient_folder_path, FOLDER_SMS),
                 patient_id=patient_id,
                 patient_name=file_slug,
+                patient_display_name=full_name,
             )
             log.patient_download_complete('SMS Log', sms_count, full_name)
             if sms_count > 0:

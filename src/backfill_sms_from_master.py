@@ -73,7 +73,11 @@ async def _reexport_sms(patient_ids: list[str] | None, facility_folder: str) -> 
             reset_category(folder, CATEGORY_SMS)
             print(f"\nDownloading SMS log for {pid} ({full_name})...")
             count = await download_sms_log(
-                page, sms_dir, patient_id=pid, patient_name=_patient_slug(patient)
+                page,
+                sms_dir,
+                patient_id=pid,
+                patient_name=_patient_slug(patient),
+                patient_display_name=full_name,
             )
             remove_empty_category_folders(folder)
             if count > 0:
