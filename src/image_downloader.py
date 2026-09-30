@@ -11,6 +11,7 @@ from download_ledger import (
     normalize_item_key,
 )
 from page_wait import goto_ready
+from patient_naming import name_slug_part, patient_image_filename
 
 _PATIENT_IMAGE_PREFIX = re.compile(r"^patient\s+image\s+", re.IGNORECASE)
 _SERVER_IMAGE_RE = re.compile(
@@ -21,18 +22,36 @@ _LEGACY_STEM_RE = re.compile(
     r"^(?P<image_id>\d+)_(?P<name>.+)_(?P<date>\d{2}-\d{2}-\d{4})(?:_(?P<time>.+))?$",
     re.IGNORECASE,
 )
+_OLD_IMAGE_STEM_RE = re.compile(
+    r"^(?P<first>[^_]+)_(?P<last>[^_]*)_(?P<patient_id>\d+)_(?P<image_id>\d+)$",
+    re.IGNORECASE,
+)
 
 
-def split_patient_name(patient_name: str) -> tuple[str, str]:
-    """Split display name into lowercase first/last parts for filenames."""
-    parts = re.split(r"\s+", (patient_name or "").strip(), maxsplit=1)
-    first = parts[0].lower().replace(" ", "_") if parts and parts[0] else ""
-    last = parts[1].lower().replace(" ", "_") if len(parts) > 1 else ""
-    return first, last
+def parse_patient_image_stem(stem: str) -> dict | None:
+    """Parse `patientId_First_Last_imageId` (new format)."""
+    parts = stem.split("_")
+    if len(parts) < 3:
+        return None
+    patient_id = parts[0]
+    image_id = parts[-1]
+    if not patient_id.isdigit() or not image_id.isdigit():
+        return None
+    name_parts = parts[1:-1]
+    if not name_parts:
+        return None
+    first = name_parts[0]
+    last = "_".join(name_parts[1:]) if len(name_parts) > 1 else ""
+    return {
+        "first": first,
+        "last": last,
+        "patient_id": patient_id,
+        "image_id": image_id,
+    }
 
 
 def parse_patient_folder_name(folder_name: str) -> tuple[str, str, str]:
-    """Parse `{id}_{First}_{Last}` folder names into id + lowercase name parts."""
+    """Parse `{id}_{First}_{Last}` folder names into id + name parts."""
     if not folder_name:
         return "", "", ""
     parts = folder_name.split("_", 1)
@@ -40,31 +59,9 @@ def parse_patient_folder_name(folder_name: str) -> tuple[str, str, str]:
         return "", "", ""
     patient_id = parts[0]
     name_parts = parts[1].split("_") if len(parts) > 1 and parts[1] else []
-    first = name_parts[0].lower() if name_parts else ""
-    last = name_parts[1].lower() if len(name_parts) > 1 else ""
+    first = name_parts[0] if name_parts else ""
+    last = "_".join(name_parts[1:]) if len(name_parts) > 1 else ""
     return patient_id, first, last
-
-
-def parse_patient_image_stem(stem: str) -> dict | None:
-    """Parse `first_last_patientId_imageId` (or `first_patientId_imageId`)."""
-    parts = stem.split("_")
-    if len(parts) < 3:
-        return None
-    image_id = parts[-1]
-    patient_id = parts[-2]
-    if not image_id.isdigit() or not patient_id.isdigit():
-        return None
-    name_parts = parts[:-2]
-    if not name_parts:
-        return None
-    first = name_parts[0].lower()
-    last = "_".join(name_parts[1:]).lower() if len(name_parts) > 1 else ""
-    return {
-        "first": first,
-        "last": last,
-        "patient_id": patient_id,
-        "image_id": image_id,
-    }
 
 
 def extract_image_id_from_stem(stem: str) -> str | None:
@@ -81,6 +78,10 @@ def extract_image_id_from_stem(stem: str) -> str | None:
     legacy_match = _LEGACY_STEM_RE.match(stem)
     if legacy_match:
         return legacy_match.group("image_id")
+
+    old_match = _OLD_IMAGE_STEM_RE.match(stem)
+    if old_match:
+        return old_match.group("image_id")
     return None
 
 
@@ -91,38 +92,29 @@ def build_patient_image_filename(
     image_id: str,
     ext: str,
 ) -> str:
-    """Build `first_last_patientId_imageId.ext` (omit last when empty)."""
-    first = first.lower().replace(" ", "_")
-    last = last.lower().replace(" ", "_") if last else ""
-    if last:
-        base = f"{first}_{last}_{patient_id}_{image_id}"
-    else:
-        base = f"{first}_{patient_id}_{image_id}"
-    return f"{base}{ext}"
+    """Build `patientId_First_Last_imageId.ext`."""
+    return patient_image_filename(patient_id, first, last, image_id, ext)
 
 
 def normalize_patient_image_filename(
     filename: str,
     *,
     patient_id: str,
-    patient_name: str | None = None,
-    first: str | None = None,
-    last: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
 ) -> str:
-    """Normalize to first_last_patientId_imageId.ext from portal download names."""
+    """Normalize to patientId_First_Last_imageId.ext from portal download names."""
     if not filename or not patient_id:
         return filename
 
     base = os.path.basename(filename)
     stem, ext = os.path.splitext(_PATIENT_IMAGE_PREFIX.sub("", base))
 
-    if first is None or last is None:
-        parsed_first, parsed_last = split_patient_name(patient_name or "")
-        first = first if first is not None else parsed_first
-        last = last if last is not None else parsed_last
+    first = name_slug_part(first_name or "")
+    last = name_slug_part(last_name or "")
 
     parsed = parse_patient_image_stem(stem)
-    if parsed and parsed["patient_id"] == patient_id:
+    if parsed and parsed["patient_id"] == str(patient_id):
         if parsed["first"] == first and parsed["last"] == last:
             return base
         image_id = parsed["image_id"]
@@ -131,7 +123,7 @@ def normalize_patient_image_filename(
         if not image_id:
             return base
 
-    return build_patient_image_filename(first, last, patient_id, image_id, ext)
+    return build_patient_image_filename(first, last, str(patient_id), image_id, ext)
 
 
 def _unique_path(folder_path: str, filename: str) -> str:
@@ -153,9 +145,10 @@ def migrate_patient_image_folder(
     folder_path: str,
     *,
     patient_id: str | None = None,
-    patient_name: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
 ) -> int:
-    """Rename images in a folder to first_last_patientId_imageId.ext."""
+    """Rename images in a folder to patientId_First_Last_imageId.ext."""
     if not os.path.isdir(folder_path):
         return 0
 
@@ -165,11 +158,8 @@ def migrate_patient_image_folder(
     else:
         folder_first, folder_last = "", ""
 
-    first, last = split_patient_name(patient_name or "")
-    if not first:
-        first = folder_first
-    if not last:
-        last = folder_last
+    first = name_slug_part(first_name or "") or folder_first
+    last = name_slug_part(last_name or "") or folder_last
 
     if not patient_id or not first:
         return 0
@@ -185,8 +175,8 @@ def migrate_patient_image_folder(
         new_name = normalize_patient_image_filename(
             name,
             patient_id=patient_id,
-            first=first,
-            last=last,
+            first_name=first_name,
+            last_name=last_name,
         )
         if new_name == name:
             continue
@@ -234,7 +224,14 @@ async def _resolve_item_key(btn, current_page, idx):
     return normalize_item_key(href) or f"image-page{current_page}-idx{idx}"
 
 
-async def download_patient_images(page, download_dir, patient_id="233957", per_page=10, patient_name=None):
+async def download_patient_images(
+    page,
+    download_dir,
+    patient_id="233957",
+    per_page=10,
+    first_name=None,
+    last_name=None,
+):
     """
     Downloads all patient images from the images list page.
     Skips items already in the folder download ledger (crash-safe resume).
@@ -242,7 +239,6 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
     settings = load_settings()
     page_timeout = settings.get('page_timeout', 60000)
     os.makedirs(download_dir, exist_ok=True)
-    first, last = split_patient_name(patient_name or "")
 
     list_page_url = f"https://www.calystaproemr.com/patient-images/index/{patient_id}?count={per_page}&page=1"
     current_page = 1
@@ -286,9 +282,8 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
                 save_filename = normalize_patient_image_filename(
                     original_filename,
                     patient_id=str(patient_id),
-                    patient_name=patient_name,
-                    first=first,
-                    last=last,
+                    first_name=first_name,
+                    last_name=last_name,
                 )
                 save_path = _unique_path(download_dir, save_filename)
 
@@ -341,7 +336,8 @@ async def download_patient_images(page, download_dir, patient_id="233957", per_p
     migrate_patient_image_folder(
         download_dir,
         patient_id=str(patient_id),
-        patient_name=patient_name,
+        first_name=first_name,
+        last_name=last_name,
     )
 
     print(f"[IMAGES] Downloaded {total_downloaded}, skipped existing {total_skipped}")

@@ -37,11 +37,16 @@ from export_status import (
 from progress_report import generate_progress_report
 from export_index import ExportIndex
 from facility_paths import (
-    copy_patient_list_to_master_data,
     delivery_report_dir,
     ensure_facility_layout,
     resolve_export_index_path,
     resolve_patients_base,
+)
+from patient_naming import (
+    filename_part,
+    patient_display_name,
+    patient_file_slug,
+    to_pascalcase,
 )
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -170,10 +175,6 @@ def load_patient_ids(csv_path):
                 patient_ids.append(patient_id)
     return patient_ids
 
-def to_pascalcase(text):
-    """Convert text to Title Case (capitalize first letter of each word)."""
-    return ' '.join(word.capitalize() for word in text.split())
-
 def patient_already_processed(patient_folder_path):
     """True only when all 10 export categories are marked done / done_empty."""
     return is_patient_export_complete(patient_folder_path)
@@ -182,21 +183,12 @@ def count_files_in_folder(folder_path):
     """Count downloaded content files (ignores resume ledger / hidden files)."""
     return count_content_files(folder_path)
 
-def rename_files_in_folder(folder_path, patient_name, document_type):
+def rename_files_in_folder(folder_path, patient_slug, document_type):
     """
     Rename files in a folder based on document type.
-    
-    Format conventions:
-    - Encounter: 'ProcedureName_PatientName_MM-DD-YYYY_#.pdf'
-      Example: 'Dermal Fillers_QA Tamzida_04-30-2026_1.pdf'
-    - Consent: 'ConsentFormName_PatientName_MM-DD-YYYY_#.pdf'
-      Example: 'Dermal Fillers_Mushfiq Rahman_01-20-2024_1.pdf'
-    - Invoice: 'Invoice_PatientName_MM-DD-YYYY.pdf'
-      Example: 'Invoice_Mushfiq Rahman_01-25-2024.pdf'
-    - Image: 'FILENAME_PatientName_MM-DD-YYYY_#.{ext}'
-      Example: 'patient_photo_Vip Patient_04-30-2026_1.jpg', 'scan_Vip Patient_04-30-2026_2.png'
-    - Membership Invoice: 'MembershipInvoice_PatientName_MM-DD-YYYY.pdf'
-      Example: 'MembershipInvoice_John Doe_04-30-2026.pdf'
+
+    All filename segments use underscores (no spaces).
+    patient_slug is e.g. 227738_Paige_Pack.
     """
     if not os.path.exists(folder_path):
         return
@@ -214,7 +206,7 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
         
         for filename in files:
             # Already renamed in a prior run — leave as-is (crash-safe resume)
-            if f"_{patient_name}_" in filename:
+            if f"_{patient_slug}_" in filename:
                 continue
 
             # Extract file extension
@@ -256,10 +248,11 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
                 document_name = re.sub(r'_|\s+-\s+\d+:\d+\s*[ap]m', ' ', name_without_ext, flags=re.IGNORECASE)
                 document_name = document_name.replace('/', ' ').strip()
             
+            document_name = filename_part(document_name)
+
             # Format filename based on document type
             if document_type == 'Invoice':
-                # Format: Invoice_PatientName_MM-DD-YYYY.extension
-                new_filename = f"Invoice_{patient_name}_{date_str}{file_extension}"
+                new_filename = f"Invoice_{patient_slug}_{date_str}{file_extension}"
             elif document_type == 'Consent':
                 # Format: ConsentFormName_PatientName_MM-DD-YYYY_#.extension
                 # Extract procedure name from parentheses if present
@@ -273,29 +266,29 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
                 else:
                     # Clean up the document name - remove patient name prefix and time stamps
                     # Remove patient name from the beginning if present
+                    slug_tail = patient_slug.split("_", 1)[-1] if patient_slug else ""
                     patient_name_variants = [
-                        patient_name,
-                        patient_name.replace(' ', '_'),
-                        patient_name.replace(' ', '').lower(),
-                        patient_name.lower()
+                        patient_slug,
+                        slug_tail,
+                        slug_tail.replace("_", " "),
+                        slug_tail.replace("_", "").lower(),
+                        slug_tail.lower(),
                     ]
-                    
+
                     for variant in patient_name_variants:
-                        if consent_name.lower().startswith(variant.lower()):
+                        if variant and consent_name.lower().startswith(variant.lower()):
                             consent_name = consent_name[len(variant):].strip('_- ')
                             break
-                    
-                    # Remove common patterns like " - 6 01 am" or similar timestamps
+
                     consent_name = re.sub(r'\s*-\s*\d+\s+\d+\s+[ap]m.*$', '', consent_name, flags=re.IGNORECASE)
-                    
-                    # If nothing meaningful remains, use "Consent Form"
+
                     if not consent_name.strip():
-                        consent_name = "Consent Form"
-                    
+                        consent_name = "Consent_Form"
+
                     print(f"  Cleaned consent name: '{consent_name}'")
-                
-                # Create base filename without sequence number
-                base_filename = f"{consent_name}_{patient_name}_{date_str}"
+
+                consent_name = filename_part(consent_name)
+                base_filename = f"{consent_name}_{patient_slug}_{date_str}"
                 new_filename = f"{base_filename}{file_extension}"
                 
                 # Handle multiple consent forms with same date by adding sequence numbers
@@ -326,10 +319,10 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
                     filename_base = os.path.splitext(filename)[0]
                 
                 # Create base filename without sequence number
-                base_filename = f"{filename_base}_{patient_name}_{date_str}"
+                filename_base = filename_part(filename_base)
+                base_filename = f"{filename_base}_{patient_slug}_{date_str}"
                 new_filename = f"{base_filename}{file_extension}"
-                
-                # Handle multiple files with same date by adding sequence numbers
+
                 final_path = os.path.join(folder_path, new_filename)
                 if os.path.exists(final_path):
                     counter = 1
@@ -341,8 +334,7 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
                             break
                         counter += 1
             elif document_type == 'Membership Invoice':
-                # Format: MembershipInvoice_PatientName_MM-DD-YYYY.extension
-                new_filename = f"MembershipInvoice_{patient_name}_{date_str}{file_extension}"
+                new_filename = f"MembershipInvoice_{patient_slug}_{date_str}{file_extension}"
             else:  # Encounter or other types
                 # Format: ProcedureName_PatientName_MM-DD-YYYY_#.extension
                 # Extract procedure name from parentheses if present
@@ -356,32 +348,30 @@ def rename_files_in_folder(folder_path, patient_name, document_type):
                 else:
                     # Clean up the document name - remove patient name prefix and time stamps
                     # Remove patient name from the beginning if present
+                    slug_tail = patient_slug.split("_", 1)[-1] if patient_slug else ""
                     patient_name_variants = [
-                        patient_name,
-                        patient_name.replace(' ', '_'),
-                        patient_name.replace(' ', '').lower(),
-                        patient_name.lower()
+                        patient_slug,
+                        slug_tail,
+                        slug_tail.replace("_", " "),
+                        slug_tail.replace("_", "").lower(),
+                        slug_tail.lower(),
                     ]
-                    
+
                     for variant in patient_name_variants:
-                        if encounter_name.lower().startswith(variant.lower()):
+                        if variant and encounter_name.lower().startswith(variant.lower()):
                             encounter_name = encounter_name[len(variant):].strip('_- ')
                             break
-                    
-                    # Remove common patterns like " - 6 01 am" or similar timestamps
+
                     encounter_name = re.sub(r'\s*-\s*\d+\s+\d+\s+[ap]m.*$', '', encounter_name, flags=re.IGNORECASE)
-                    
-                    # Remove other timestamp patterns
                     encounter_name = re.sub(r'\s*-\s*\d{1,2}:\d{2}\s*[ap]m.*$', '', encounter_name, flags=re.IGNORECASE)
-                    
-                    # If nothing meaningful remains, use "Encounter"
+
                     if not encounter_name.strip():
                         encounter_name = "Encounter"
-                    
+
                     print(f"  Cleaned encounter name: '{encounter_name}'")
-                
-                # Create base filename without sequence number
-                base_filename = f"{encounter_name}_{patient_name}_{date_str}"
+
+                encounter_name = filename_part(encounter_name)
+                base_filename = f"{encounter_name}_{patient_slug}_{date_str}"
                 new_filename = f"{base_filename}{file_extension}"
                 
                 # Handle multiple encounters with same date by adding sequence numbers
@@ -530,10 +520,9 @@ def shard_patients(patients, worker_count):
 
 def expected_patient_folder(base_downloads_path, patient):
     """Folder path this run would create for a patient row."""
-    first = to_pascalcase(patient['first_name'])
-    last = to_pascalcase(patient['last_name'])
     return os.path.join(
-        base_downloads_path, f"{patient['id']}_{first}_{last}"
+        base_downloads_path,
+        patient_file_slug(patient["id"], patient["first_name"], patient["last_name"]),
     )
 
 
@@ -654,11 +643,10 @@ async def process_one_patient(
     first_name = patient['first_name']
     last_name = patient['last_name']
 
-    first_name_pascal = to_pascalcase(first_name)
-    last_name_pascal = to_pascalcase(last_name)
-    full_name = f"{first_name_pascal} {last_name_pascal}"
+    full_name = patient_display_name(first_name, last_name)
+    file_slug = patient_file_slug(patient_id, first_name, last_name)
 
-    folder_name = f"{patient_id}_{first_name_pascal}_{last_name_pascal}"
+    folder_name = file_slug
     patient_folder_path = os.path.join(base_downloads_path, folder_name)
     # Prefer an existing download folder for this id (crash / naming drift)
     if not os.path.isdir(patient_folder_path) and os.path.isdir(base_downloads_path):
@@ -707,7 +695,8 @@ async def process_one_patient(
                 page,
                 os.path.join(patient_folder_path, FOLDER_DETAILS),
                 patient_id=patient_id,
-                patient_name=full_name,
+                first_name=first_name,
+                last_name=last_name,
             )
             log.patient_download_complete('Patient Details', details_count, full_name)
             if details_count > 0:
@@ -723,13 +712,18 @@ async def process_one_patient(
         else:
             log.patient_download_start('Image', full_name)
             await download_patient_images(
-                page, images_download_path,
-                patient_id=patient_id, per_page=per_page, patient_name=full_name,
+                page,
+                images_download_path,
+                patient_id=patient_id,
+                per_page=per_page,
+                first_name=first_name,
+                last_name=last_name,
             )
             migrate_patient_image_folder(
                 images_download_path,
                 patient_id=str(patient_id),
-                patient_name=full_name,
+                first_name=first_name,
+                last_name=last_name,
             )
             images_count = count_files_in_folder(images_download_path)
             log.patient_download_complete('Image', images_count, full_name)
@@ -750,7 +744,7 @@ async def process_one_patient(
                 page,
                 os.path.join(patient_folder_path, FOLDER_APPOINTMENTS),
                 patient_id=patient_id,
-                patient_name=full_name,
+                patient_name=file_slug,
             )
             log.patient_download_complete('Appointment History', appointment_count, full_name)
             mark_category(
@@ -770,7 +764,7 @@ async def process_one_patient(
                 page,
                 os.path.join(patient_folder_path, FOLDER_SERVICES),
                 patient_id=patient_id,
-                patient_name=full_name,
+                patient_name=file_slug,
             )
             log.patient_download_complete('Service History', service_count, full_name)
             mark_category(
@@ -790,7 +784,7 @@ async def process_one_patient(
             await download_encounter_documents(
                 page, encounter_path, patient_id=patient_id, per_page=per_page
             )
-            rename_files_in_folder(encounter_path, full_name, 'Encounter')
+            rename_files_in_folder(encounter_path, file_slug, 'Encounter')
             encounter_count = count_files_in_folder(encounter_path)
             log.patient_download_complete('Encounter', encounter_count, full_name)
             mark_category(
@@ -808,7 +802,7 @@ async def process_one_patient(
             await download_consent_documents(
                 page, consent_path, patient_id=patient_id, per_page=per_page
             )
-            rename_files_in_folder(consent_path, full_name, 'Consent')
+            rename_files_in_folder(consent_path, file_slug, 'Consent')
             consent_count = count_files_in_folder(consent_path)
             log.patient_download_complete('Consent', consent_count, full_name)
             mark_category(
@@ -826,7 +820,7 @@ async def process_one_patient(
             await download_invoice_documents(
                 page, invoice_path, patient_id=patient_id, per_page=per_page
             )
-            rename_files_in_folder(invoice_path, full_name, 'Invoice')
+            rename_files_in_folder(invoice_path, file_slug, 'Invoice')
             invoice_count = count_files_in_folder(invoice_path)
             log.patient_download_complete('Invoice', invoice_count, full_name)
             mark_category(
@@ -844,7 +838,7 @@ async def process_one_patient(
             await download_membership_invoices(
                 page, membership_path, patient_id=patient_id, per_page=per_page
             )
-            rename_files_in_folder(membership_path, full_name, 'Membership Invoice')
+            rename_files_in_folder(membership_path, file_slug, 'Membership Invoice')
             membership_count = count_files_in_folder(membership_path)
             log.patient_download_complete('Membership Invoice', membership_count, full_name)
             mark_category(
@@ -864,7 +858,7 @@ async def process_one_patient(
                 page,
                 os.path.join(patient_folder_path, FOLDER_CREDITS),
                 patient_id=patient_id,
-                patient_name=full_name,
+                patient_name=file_slug,
             )
             log.patient_download_complete('Available Credits', credits_count, full_name)
             if credits_count > 0:
@@ -884,7 +878,7 @@ async def process_one_patient(
                 page,
                 os.path.join(patient_folder_path, FOLDER_SMS),
                 patient_id=patient_id,
-                patient_name=full_name,
+                patient_name=file_slug,
             )
             log.patient_download_complete('SMS Log', sms_count, full_name)
             if sms_count > 0:
@@ -1059,10 +1053,6 @@ async def main():
     facility_folder = sanitize_facility_folder_name(facility_name)
     ensure_facility_layout(facility_folder)
     base_downloads_path = resolve_patients_base(facility_folder)
-    copied_list = copy_patient_list_to_master_data(facility_folder, csv_path)
-    if copied_list:
-        log.info(f"Copied patient list to Master Data: {os.path.basename(copied_list)}")
-
     worker_count = max(1, int(settings.get('worker_count', 1) or 1))
     # Supervisor can override via EXPORT_WORKER_COUNT (adaptive 5→3→2)
     env_workers = (os.environ.get('EXPORT_WORKER_COUNT') or '').strip()

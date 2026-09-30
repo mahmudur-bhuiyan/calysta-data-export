@@ -31,7 +31,7 @@ def backfill(facility_folder: str) -> int:
             skipped += 1
             continue
 
-        csv_files = [f for f in os.listdir(details_dir) if f.endswith("_details.csv")]
+        csv_files = [f for f in os.listdir(details_dir) if f.lower().endswith("_details.csv")]
         if not csv_files:
             skipped += 1
             continue

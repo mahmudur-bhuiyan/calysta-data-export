@@ -107,7 +107,7 @@ def _read_patient_contact(patient_folder: str) -> Tuple[str, str]:
     if not os.path.isdir(details_dir):
         return "", ""
     for name in sorted(os.listdir(details_dir)):
-        if not name.endswith("_details.csv"):
+        if not name.lower().endswith("_details.csv"):
             continue
         path = os.path.join(details_dir, name)
         try:

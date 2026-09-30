@@ -22,14 +22,17 @@ from main import (
     select_patient_csv,
     to_pascalcase,
 )
+from patient_naming import patient_display_name, patient_file_slug
 from progress_report import generate_progress_report
 from service_history_downloader import download_service_history
 
 
 def _patient_name(patient: dict) -> str:
-    first = to_pascalcase(patient["first_name"])
-    last = to_pascalcase(patient["last_name"])
-    return f"{first} {last}"
+    return patient_display_name(patient["first_name"], patient["last_name"])
+
+
+def _patient_slug(patient: dict) -> str:
+    return patient_file_slug(patient["id"], patient["first_name"], patient["last_name"])
 
 
 async def reexport_services(patient_ids: list[str]) -> int:
@@ -78,7 +81,7 @@ async def reexport_services(patient_ids: list[str]) -> int:
             os.makedirs(svc_dir, exist_ok=True)
             print(f"\nDownloading service history for {pid} ({full_name})...")
             count = await download_service_history(
-                page, svc_dir, patient_id=pid, patient_name=full_name
+                page, svc_dir, patient_id=pid, patient_name=_patient_slug(patient)
             )
             mark_category(
                 folder,

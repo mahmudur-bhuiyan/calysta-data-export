@@ -63,7 +63,7 @@ def _preflight() -> int:
     print(f"Patient list: {os.path.basename(csv_path)}", flush=True)
     print(f"Output: downloads/{facility}/", flush=True)
     print(
-        f"  ├── {facility} - Master Data/",
+        f"  ├── {facility} - Master Data/  (manual only)",
         flush=True,
     )
     print(

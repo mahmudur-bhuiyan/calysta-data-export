@@ -63,10 +63,13 @@ def resolve_patient_folder(
     to_pascalcase: Callable[[str], str],
 ) -> str:
     """Expected folder path, or an existing folder matching this patient id."""
+    from patient_naming import patient_file_slug
+
     patient_id = str(patient["id"]).strip()
-    first = to_pascalcase(patient["first_name"])
-    last = to_pascalcase(patient["last_name"])
-    expected = os.path.join(base_downloads_path, f"{patient_id}_{first}_{last}")
+    expected = os.path.join(
+        base_downloads_path,
+        patient_file_slug(patient_id, patient["first_name"], patient["last_name"]),
+    )
     if os.path.isdir(expected):
         return expected
     if os.path.isdir(base_downloads_path):

@@ -49,7 +49,7 @@ def _has_details_csv(folder: str) -> bool:
     sub = os.path.join(folder, FOLDER_DETAILS)
     if not os.path.isdir(sub):
         return False
-    return any(name.endswith("_details.csv") for name in os.listdir(sub))
+    return any(name.lower().endswith("_details.csv") for name in os.listdir(sub))
 
 
 def _has_appointment_csv(folder: str) -> bool:
@@ -122,7 +122,7 @@ def validate(facility_folder: str, facility_name: str) -> dict[str, list[tuple]]
 
     print(
         "\nNote: All export categories are scraped from the Calysta portal. "
-        "Master Data is optional and is not used as a source for exports."
+        "Master Data is manual-only — the exporter does not read from or write to it."
     )
 
     return gaps

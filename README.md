@@ -32,8 +32,7 @@ Root path:
 downloads/
 ├── logs/
 └── <Facility Name>/
-    ├── <Facility Name> - Master Data/          (optional delivery copy of patient list)
-    │   └── <patient list CSV copy, if enabled>
+    ├── <Facility Name> - Master Data/          (manual only — exporter does not write here)
     ├── <Facility Name> - Patients Records/
     │   ├── export_index.csv
     │   └── {PatientId}_{FirstName}_{LastName}/
@@ -144,7 +143,7 @@ On startup the exporter:
 1. Scans `patient_lists/` for valid patient CSVs only
 2. Selects the file whose **filename matches** the `facility` from `credentials.yaml` (spaces, hyphens, and underscores are ignored when matching)
 3. If no file matches, the run stops with a clear error listing what was found
-4. Writes exports under `downloads/<Facility Name>/` with **Patients Records** and **Delivery Report** subfolders (and optionally copies the patient list into **Master Data** for delivery)
+4. Writes exports under `downloads/<Facility Name>/` with **Patients Records** and **Delivery Report** subfolders (**Master Data** is not modified by the exporter)
 
 Example layout:
 

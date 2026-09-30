@@ -110,17 +110,6 @@ def resolve_export_index_path(facility_folder: str) -> str:
     return new_path
 
 
-def copy_patient_list_to_master_data(facility_folder: str, csv_path: str) -> Optional[str]:
-    """Copy the source patient list CSV into Master Data for client delivery."""
-    if not csv_path or not os.path.isfile(csv_path):
-        return None
-    dest = os.path.join(master_data_dir(facility_folder), os.path.basename(csv_path))
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.abspath(csv_path) != os.path.abspath(dest):
-        shutil.copy2(csv_path, dest)
-    return dest
-
-
 def migrate_legacy_facility_layout(facility_folder: str) -> Dict[str, int]:
     """
     Move a flat legacy facility folder into the three-subfolder layout.

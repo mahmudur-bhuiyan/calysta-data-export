@@ -21,12 +21,17 @@ from main import (
     select_patient_csv,
     to_pascalcase,
 )
+from patient_naming import patient_display_name, patient_file_slug
 from progress_report import generate_progress_report
 from sms_log_downloader import download_sms_log
 
 
 def _patient_name(patient: dict) -> str:
-    return f"{to_pascalcase(patient['first_name'])} {to_pascalcase(patient['last_name'])}"
+    return patient_display_name(patient["first_name"], patient["last_name"])
+
+
+def _patient_slug(patient: dict) -> str:
+    return patient_file_slug(patient["id"], patient["first_name"], patient["last_name"])
 
 
 async def _reexport_sms(patient_ids: list[str] | None, facility_folder: str) -> int:
@@ -68,7 +73,7 @@ async def _reexport_sms(patient_ids: list[str] | None, facility_folder: str) -> 
             reset_category(folder, CATEGORY_SMS)
             print(f"\nDownloading SMS log for {pid} ({full_name})...")
             count = await download_sms_log(
-                page, sms_dir, patient_id=pid, patient_name=full_name
+                page, sms_dir, patient_id=pid, patient_name=_patient_slug(patient)
             )
             remove_empty_category_folders(folder)
             if count > 0:

@@ -1,9 +1,10 @@
-# Scrape patient profile details into {PatientName}_details.csv
+# Scrape patient profile details into {patient_id}_{First}_{Last}_Details.csv
 
 import os
 import csv
 import asyncio
 import yaml
+from patient_naming import details_csv_filename
 from patient_details_selectors import (
     PATIENT_DETAILS_URL,
     PATIENT_DETAIL_FIELDS,
@@ -71,10 +72,11 @@ async def _extract_detail_fields(page):
     )
 
 
-async def download_patient_details(page, download_dir, patient_id, patient_name):
+async def download_patient_details(page, download_dir, patient_id, first_name, last_name):
     """
-    Scrape patient details from /patients/view/{id} into {PatientName}_details.csv
-    as a single row with fixed columns. Empty values become N/A.
+    Scrape patient details from /patients/view/{id} into
+    {patient_id}_{First}_{Last}_Details.csv as a single row with fixed columns.
+    Empty values become N/A.
 
     Returns 1 on success, 0 on failure.
     """
@@ -119,7 +121,7 @@ async def download_patient_details(page, download_dir, patient_id, patient_name)
             row["patient_id"] = str(patient_id).strip()
 
             os.makedirs(download_dir, exist_ok=True)
-            filename = f"{patient_name}_details.csv"
+            filename = details_csv_filename(patient_id, first_name, last_name)
             save_path = os.path.join(download_dir, filename)
 
             with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
