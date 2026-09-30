@@ -17,7 +17,7 @@ For each patient in the input CSV (`id`, `first_name`, `last_name`), the exporte
 | 07 | Patient invoices | Invoice PDFs |
 | 08 | Membership invoices | Membership invoice PDFs |
 | 09 | Available credits | Booking, banked, e-gift, and referral credit balances in one CSV |
-| 10 | SMS log history | SMS conversation log scraped from the portal as CSV (`patient_id`, `patient_name`, `type`, `message`, `category`, `sent_on`) |
+| 10 | SMS log history | SMS conversation log scraped from the portal as CSV (`patient_id`, `type`, `message`, `category`, `sent_on`) |
 
 Also generated after each run:
 

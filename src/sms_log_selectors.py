@@ -11,7 +11,6 @@ NO_RESULTS_TEXT = "no results found"
 
 SMS_LOG_COLUMNS = [
     "patient_id",
-    "patient_name",
     "type",
     "message",
     "category",

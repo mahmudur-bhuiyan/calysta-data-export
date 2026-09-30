@@ -59,7 +59,6 @@ async def _extract_sms_rows(page, patient_id, patient_name):
             const category = norm(categoryEl ? categoryEl.innerText : '');
             return {
               patient_id: String(patientId),
-              patient_name: patientName,
               type: isPatient ? patientName : 'Facility',
               message,
               category,
